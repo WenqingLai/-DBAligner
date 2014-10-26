@@ -36,8 +36,7 @@ local_edits_ratio=0.32
 ###We control edits in each extension interval.
 local_min_edits=3
 ###If the extension interval is 2bp,the local_edits_ratio may derive 0.64bp edits.
-###We can set local_min_edits to tweak the situation if the extension interval is too small.
-###So now, the maximum allowed edits in each extension interval are 3bp rather than 0.64bp. 
+###We can set local_min_edits to tweak the situation if the extension interval is too small.So now, the maximum allowed edits ###in each extension interval are 3bp rather than 0.64bp. 
 local_max_gap_bases=2
 ###Likewise,we control the gap bases in each extension interval.
 ###For efficiency,we don't let the allowed local gap bases grow along with the extension interval length as ###local_edits_ratio has done.
