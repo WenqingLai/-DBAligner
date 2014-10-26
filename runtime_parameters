@@ -1,0 +1,24 @@
+#This file must be put in the same folder with the executable program.
+#You can only change the value after the '=' sign.
+#Blank space is not allowed in the quote.
+data_dir="./"
+ref_file="yeast.fa"
+reads_file="left_reads.fq right_reads.fq"
+aln_result="DBAligner3.sam"
+seed_size=18
+global_edits_ratio=0.15
+global_gap_bases_ratio=0.08
+local_edits_ratio=0.32
+local_min_edits=3
+local_max_gap_bases=2
+max_local_results=200
+vote_cutoff=0.2
+report_all=0
+max_refs=200
+max_read_len=500
+lest_stone_pes=100
+median_factor=0.5
+deviation_factor=4
+designate_insert_scope=0
+insert_low_bound=0
+insert_high_bound=600
