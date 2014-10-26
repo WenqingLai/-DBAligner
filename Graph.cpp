@@ -1,0 +1,6096 @@
+/*
+ * Graph.cpp
+ *
+ *  Created on: Mar 10, 2014
+ *      Author: laiwenqi
+ */
+
+#include "Graph.h"
+#include<algorithm>
+#include<iostream>
+#include "DNA.h"
+using namespace std;
+int SearchInterval::makeIntervals(int lookupShared[],bool marks[],int marks_len,SearchInterval intervals[]){
+	short i,prev_start,current;
+	int edit;
+	bool in_gap;
+	SearchInterval interval;
+	current=0;
+	for(i=0;i!=marks_len;i++){
+		if(marks[i])
+			break;
+	}
+	if(i>0){
+		interval.type=backward;
+		interval.path_start=lookupShared[i];
+		interval.path_end=-1;
+		interval.read_start=i;
+		interval.read_end=-1;
+		edit=Configure::local_edit_ratio*interval.read_start;
+		if(edit<Configure::local_min_edit)
+			edit=Configure::local_min_edit;
+		interval.max_edit=edit;
+		intervals[current++]=interval;
+	}
+	in_gap=false;
+	prev_start=-1;
+	for(;i!=marks_len;i++){
+		if(!marks[i]){
+			if(!in_gap){
+				prev_start=i-1;
+				in_gap=true;
+			}
+		}
+		else if(in_gap){
+			interval.path_start=lookupShared[prev_start];
+			interval.path_end=lookupShared[i];
+			interval.read_start=prev_start+Configure::seed_size-1;
+			interval.read_end=i+Configure::seed_size-1;
+			interval.type=middle;
+			edit=Configure::local_edit_ratio*(interval.read_end-interval.read_start-Configure::seed_size+1);
+			if(edit<Configure::local_min_edit)
+				edit=Configure::local_min_edit;
+			interval.max_edit=edit;
+			intervals[current++]=interval;
+			in_gap=false;
+		}
+	}
+	if(!marks[marks_len-1]){
+		interval.path_start=lookupShared[prev_start];
+		interval.path_end=-1;
+		interval.read_start=prev_start+Configure::seed_size-1;
+		interval.read_end=marks_len+Configure::seed_size-1;
+		interval.type=forward;
+		edit=Configure::local_edit_ratio*(interval.read_end-interval.read_start);
+		if(edit<Configure::local_min_edit)
+			edit=Configure::local_min_edit;
+		interval.max_edit=edit;
+		intervals[current++]=interval;
+	}
+	return current;
+}
+int SearchInterval::makeLimitIntervals(int lookupShared[],bool marks[],int marks_len,SearchInterval intervals[]){
+	short i,prev_start,current;
+	bool in_gap;
+	SearchInterval interval;
+	current=0;
+	for(i=0;i!=marks_len;i++){
+		if(marks[i])
+			break;
+	}
+	if(i>0){
+		interval.type=backward;
+		interval.path_start=lookupShared[i];
+		interval.path_end=-1;
+		interval.read_start=i;
+		interval.read_end=-1;
+		intervals[current++]=interval;
+	}
+	in_gap=false;
+	prev_start=-1;
+	for(;i!=marks_len;i++){
+		if(!marks[i]){
+			if(!in_gap){
+				prev_start=i-1;
+				in_gap=true;
+			}
+		}
+		else if(in_gap){
+			interval.path_start=lookupShared[prev_start];
+			interval.path_end=lookupShared[i];
+			interval.read_start=prev_start+Configure::seed_size-1;
+			interval.read_end=i+Configure::seed_size-1;
+			interval.type=middle;
+			intervals[current++]=interval;
+			in_gap=false;
+		}
+	}
+	if(!marks[marks_len-1]){
+		interval.path_start=lookupShared[prev_start];
+		interval.path_end=-1;
+		interval.read_start=prev_start+Configure::seed_size-1;
+		interval.read_end=marks_len+Configure::seed_size-1;
+		interval.type=forward;
+		intervals[current++]=interval;
+	}
+	return current;
+}
+int SearchInterval::makeBackwardIntervals(int lookupShared[],bool marks[],int marks_len,SearchInterval intervals[]){
+	short i,prev_start,current;
+	int edit;
+	bool in_gap;
+	SearchInterval interval;
+	current=0;
+	for(i=marks_len-1;i!=-1;i--){
+		if(marks[i])
+			break;
+	}
+	if(i!=marks_len-1){
+		interval.type=forward;
+		interval.path_start=lookupShared[i];
+		interval.path_end=-1;
+		interval.read_start=i+Configure::seed_size-1;
+		interval.read_end=marks_len+Configure::seed_size-1;
+		edit=Configure::local_edit_ratio*(interval.read_end-interval.read_start);
+		if(edit<Configure::local_min_edit)
+			edit=Configure::local_min_edit;
+		interval.max_edit=edit;
+		intervals[current]=interval;
+		current++;
+	}
+	in_gap=false;
+	prev_start=-1;
+	for(;i!=-1;i--){
+		if(!marks[i]){
+			if(!in_gap){
+				prev_start=i+1;
+				in_gap=true;
+			}
+		}
+		else if(in_gap){
+			interval.path_start=lookupShared[prev_start];
+			interval.path_end=lookupShared[i];
+			interval.read_start=prev_start;
+			interval.read_end=i;
+			interval.type=middle;
+			edit=Configure::local_edit_ratio*(interval.read_end-interval.read_start-Configure::seed_size+1);
+			if(edit<Configure::local_min_edit)
+				edit=Configure::local_min_edit;
+			interval.max_edit=edit;
+			intervals[current]=interval;
+			current++;
+			in_gap=false;
+		}
+	}
+	if(!marks[0]){
+		interval.path_start=lookupShared[prev_start];
+		interval.path_end=-1;
+		interval.read_start=prev_start;
+		interval.read_end=-1;
+		interval.type=backward;
+		edit=Configure::local_edit_ratio*interval.read_start;
+		if(edit<Configure::local_min_edit)
+			edit=Configure::local_min_edit;
+		interval.max_edit=edit;
+		intervals[current]=interval;
+		current++;
+	}
+	return current;
+}
+unsigned char Vertex::set_flag=0x10;
+unsigned char Vertex::clear_flag=0xEF;
+
+int SearchNode::no_prev=-1;
+unsigned char SearchNode::read_gap=1;
+unsigned char SearchNode::path_gap=2;
+unsigned char SearchNode::mismatch=3;
+unsigned char SearchNode::match=4;
+unsigned char SearchNode::start=5;
+unsigned char SearchNode::terminal=6;
+
+Graph::Graph(Reference * pRef_seq, HashTable * pHash_table) {
+	string path;
+	this->pRef_seq=pRef_seq;
+	ref_str=pRef_seq->ref_str.c_str();
+	ref_size=pRef_seq->ref_str.size();
+	vertices_capacity=ref_size-Configure::seed_size+1;
+	vertices=new Vertex[vertices_capacity];
+	pLookupString=pHash_table;
+	constructGraph();
+	marks_mem=new bool[Configure::max_read_len];
+	lookupShared=new int[Configure::max_read_len];
+	intervals=new SearchInterval[Configure::max_read_len/Configure::seed_size+2];
+	valid_poses=new int[Configure::max_local_results];
+	result_poses=new int[Configure::max_local_results];
+	searchNodes_capacity=1<<15;
+	searchNodes=new SearchNode[searchNodes_capacity];
+	locations_capacity=Configure::max_read_len;
+	locations=new int[locations_capacity];
+	temp_alignments_capacity=Configure::max_local_results<<1;
+	temp_alignments=new NaiveAlignmentFormat[temp_alignments_capacity];
+	chimera_poses=new int[Configure::max_read_len];
+	pLookupInterval=new int[Configure::max_read_len];
+	temp_alignments_poses=new int[temp_alignments_capacity];
+	best_poses=new int[Configure::max_local_results];
+}
+Graph::~Graph() {
+}
+void Graph::constructGraph(){
+	int i,j,pos;
+	int current_pos,prev_pos;
+	Vertex vertex;
+	pos=ref_size-Configure::seed_size;
+	pLookupString->tryToAdd(pos,0);
+	vertices[0].content=pos;
+	vertices[0].in_count=0;
+	vertices[0].out_count=0;
+	vertices_size=1;
+	current_pos=pos;
+	for(i=pos-1;i!=-1;i--){
+		if(pLookupString->tryToAdd(i,vertices_size)){
+			vertices[vertices_size].content=i;
+			vertices[vertices_size].in_count=0;
+			vertices[vertices_size].out_count=0;
+			vertices_size++;
+		}
+		prev_pos=current_pos;
+		current_pos=pLookupString->get(i);
+		vertex=vertices[prev_pos];
+		for(j=0;j!=vertex.in_count;j++){
+			if(vertex.in_edges[j]==current_pos)
+				break;
+		}
+		if(j==vertex.in_count){
+			vertices[prev_pos].in_edges[vertices[prev_pos].in_count]=current_pos;
+			vertices[prev_pos].in_count++;
+			vertices[current_pos].out_edges[vertices[current_pos].out_count]=prev_pos;
+			vertices[current_pos].out_count++;
+		}
+	}
+}
+void Graph::printIntervals(){
+	int i;
+	SearchInterval * pInterval;
+	for(i=0;i!=intervals_size;i++){
+		pInterval=&intervals[i];
+		cout<<pInterval->read_start<<","<<pInterval->read_end<<endl;
+	}
+}
+void Graph::printMarks(){
+	int i;
+	for(i=0;i!=marks_len;i++)
+		if(marks[i])
+			cout<<"1";
+		else
+			cout<<"0";
+	cout<<endl;
+}
+void Graph::clearLocations(){
+	int i;
+	for(i=0;i!=locations_size;i++){
+		vertices[locations[i]].in_count&=Vertex::clear_flag;
+	}
+}
+void Graph::printLocations(){
+	int i;
+	for(i=0;i!=locations_size;i++){
+		cout<<locations[i]<<" ";
+	}
+	cout<<endl;
+}
+void Graph::printTempAlignments(){
+	int i;
+	for(i=0;i!=temp_alignments_size;i++){
+		cout<<temp_alignments[i].ref_pos<<","<<temp_alignments[i].edit<<","<<temp_alignments[i].cigar<<endl;
+	}
+}
+bool Graph::findSharedVertex(){
+	short i;
+	bool attached;
+	string str;
+	attached=false;
+	for(i=0;i!=marks_len;i++){
+		if(marks[i]){
+			attached=true;
+			str=read.substr(i,Configure::seed_size);
+			lookupShared[i]=pLookupString->get(str);
+		}
+		else
+			lookupShared[i]=-1;
+	}
+	return attached;
+}
+bool Graph::findLimitSharedVertex(){
+	int i,begin,end,vertex_loc;
+	bool attached;
+	string str;
+	locations_size=0;
+	end=approximate_start+read.length()+Configure::global_max_gap-Configure::seed_size;
+	if(end>vertices_capacity)
+		end=vertices_capacity;
+	begin=approximate_start-Configure::global_max_gap;
+	if(begin<0)
+		begin=0;
+	for(i=begin;i!=end;i++){
+		vertex_loc=pLookupString->get(pRef_seq->ref_str.substr(i,Configure::seed_size));
+		locations[locations_size++]=vertex_loc;
+		vertices[vertex_loc].in_count|=Vertex::set_flag;
+	}
+	attached=false;
+	for(i=0;i!=marks_len;i++){
+		str=read.substr(i,Configure::seed_size);
+		if(pLookupString->containsKey(str)){
+			vertex_loc=pLookupString->get(str);
+			if(vertices[vertex_loc].in_count&Vertex::set_flag){
+				marks[i]=true;
+				attached=true;
+				lookupShared[i]=vertex_loc;
+				continue;
+			}
+		}
+		marks[i]=false;
+		lookupShared[i]=-1;
+	}
+	return attached;
+}
+void Graph::recifySharedVertex(){
+	int i,island_count,gap_count;
+	bool in_gap;
+	gap_count=0;
+	for(i=0;i!=marks_len;i++){
+		if(marks[i])
+			break;
+		else
+			gap_count++;
+	}
+	island_count=0;
+	for(;i!=marks_len;i++){
+		if(marks[i])
+			island_count++;
+		else
+			break;
+	}
+	if(i==marks_len)
+		return;
+	if(gap_count==0){
+		if(island_count>=2){
+			marks[i-1]=false;
+			gap_count=1;
+		}
+		else{
+			gap_count=0;
+		}
+	}
+	else{
+		if(island_count>=3){
+			marks[i-island_count]=false;
+			marks[i-1]=false;
+			gap_count=1;
+		}
+		else if(island_count==2){
+			marks[i-1]=false;
+			gap_count=1;
+		}
+		else{
+			gap_count=0;
+		}
+	}
+	in_gap=true;
+	for(;i!=marks_len;i++){
+		if(marks[i]){
+			if(in_gap){
+				in_gap=false;
+				island_count=1;
+			}
+			else{
+				island_count++;
+			}
+		}
+		else{
+			if(in_gap){
+				gap_count++;
+			}
+			else{
+				if(island_count>=3){
+					marks[i-island_count]=false;
+					marks[i-1]=false;
+					if(gap_count+1<Configure::seed_size&&!marks[i-island_count-gap_count-2])
+						marks[i-island_count-gap_count-1]=false;
+					gap_count=2;
+				}
+				else if(island_count==2){
+					if(gap_count+1<Configure::seed_size){
+						marks[i-2]=false;
+						marks[i-1]=false;
+						gap_count+=3;
+					}
+					else if(gap_count<Configure::seed_size){
+						marks[i-2]=false;
+						gap_count=1;
+					}
+					else{
+						marks[i-1]=false;
+						gap_count=2;
+					}
+				}
+				else if(island_count==1){
+					if(gap_count<Configure::seed_size){
+						marks[i-1]=false;
+						gap_count+=2;
+					}
+					else
+						gap_count=1;
+				}
+				in_gap=true;
+			}
+		}
+	}
+	if(!in_gap){
+		if(island_count>=3){
+			marks[i-island_count]=false;
+			if(gap_count+1<Configure::seed_size&&!marks[i-island_count-gap_count-2])
+					marks[i-island_count-gap_count-1]=false;
+		}
+		else if(island_count==2)
+			marks[i-2]=false;
+	}
+}
+int Graph::searchGraph(const string & read,bool temp_marks[],int len){
+	int i,j,active_start,pos;
+	SearchInterval interval;
+	SearchNode node;
+	this->read=read;
+	intervals_size=0;
+	marks=temp_marks;
+	marks_len=len;
+	if(!findSharedVertex())//if shared vertex is 0, return false
+		return 0;
+	intervals_size=SearchInterval::makeIntervals(lookupShared,marks,marks_len,intervals);
+	if(intervals_size==0){
+		return 1;
+	}
+	interval=intervals[0];
+	node.action=SearchNode::terminal;
+	node.vertex_loc=interval.path_start;
+	node.read_pos=interval.read_start;
+	node.global_edit=0;
+	node.local_edit=0;
+	node.local_gap=0;
+	node.global_gap=0;
+	node.prev_pos=SearchNode::no_prev;
+	searchNodes[0]=node;
+	searchNodes_size=1;
+	active_start=0;
+	if(interval.type==backward)
+		backwardSearch(active_start,interval);
+	else if(interval.type==forward)
+		forwardSearch(active_start,interval);
+	else
+		middleSearch(active_start,interval);
+	for(i=1;i!=intervals_size;i++){
+		if(searchNodes_size==searchNodes_capacity)
+			return 0;
+		if(valid_poses_size==0)
+			break;
+		interval=intervals[i];
+		active_start=searchNodes_size;
+		for(j=0;j!=valid_poses_size;j++){
+			pos=valid_poses[j];
+			node.action=SearchNode::start;
+			node.vertex_loc=interval.path_start;
+			node.read_pos=interval.read_start;
+			node.global_edit=searchNodes[pos].global_edit;
+			node.local_edit=0;
+		    node.local_gap=0;
+			node.global_gap=searchNodes[pos].global_gap;
+			node.prev_pos=pos;
+			searchNodes[searchNodes_size++]=node;
+			if(searchNodes_size==searchNodes_capacity)
+				return 0;
+		}
+		if(interval.type==forward)
+			forwardSearch(active_start,interval);
+		else
+			middleSearch(active_start,interval);
+	}
+	return valid_poses_size;
+}
+int Graph::limitSearch(const string & read,int ref_start){
+	int i,j,active_start,pos;
+	SearchInterval interval;
+	SearchNode node;
+	string ref_read;
+	this->read=read;
+	this->approximate_start=ref_start;
+	marks_len=read.length()-Configure::seed_size+1;
+	marks=marks_mem;
+	intervals_size=0;
+	if(!findLimitSharedVertex()){//if shared vertex is 0, return false
+		clearLocations();
+		return 0;
+	}
+	intervals_size=SearchInterval::makeIntervals(lookupShared,marks,marks_len,intervals);
+	if(intervals_size==0){
+		clearLocations();
+		return 1;
+	}
+	interval=intervals[0];
+	node.action=SearchNode::terminal;
+	node.vertex_loc=interval.path_start;
+	node.read_pos=interval.read_start;
+	node.global_edit=0;
+	node.global_gap=0;
+	node.local_edit=0;
+	node.local_gap=0;
+	node.prev_pos=SearchNode::no_prev;
+	searchNodes[0]=node;
+	searchNodes_size=1;
+	active_start=0;
+	if(interval.type==backward)
+		backwardLimitSearch(active_start,interval);
+	else if(interval.type==forward)
+		forwardLimitSearch(active_start,interval);
+	else
+		middleLimitSearch(active_start,interval);
+	for(i=1;i!=intervals_size;i++){
+		if(searchNodes_size==searchNodes_capacity){
+			clearLocations();
+			return 0;
+		}
+		if(valid_poses_size==0)
+			break;
+		interval=intervals[i];
+		active_start=searchNodes_size;
+		for(j=0;j!=valid_poses_size;j++){
+			pos=valid_poses[j];
+			node.action=SearchNode::start;
+			node.vertex_loc=interval.path_start;
+			node.read_pos=interval.read_start;
+			node.global_edit=searchNodes[pos].global_edit;
+			node.global_gap=searchNodes[pos].global_gap;
+			node.local_edit=0;
+			node.local_gap=0;
+			node.prev_pos=pos;
+			searchNodes[searchNodes_size++]=node;
+			if(searchNodes_size==searchNodes_capacity){
+				clearLocations();
+				return 0;
+			}
+		}
+		if(interval.type==forward)
+			forwardLimitSearch(active_start,interval);
+		else
+			middleLimitSearch(active_start,interval);
+	}
+	clearLocations();
+	return valid_poses_size;
+}
+int Graph::limitSearch2(const string & read,int ref_start){
+	int i,j,active_start,pos;
+	SearchInterval interval;
+	SearchNode node;
+	string ref_read;
+	this->read=read;
+	this->approximate_start=ref_start;
+	marks_len=read.length()-Configure::seed_size+1;
+	marks=marks_mem;
+	intervals_size=0;
+	if(!findLimitSharedVertex()){//if shared vertex is 0, return false
+		clearLocations();
+		return 0;
+	}
+	intervals_size=SearchInterval::makeLimitIntervals(lookupShared,marks,marks_len,intervals);
+	if(intervals_size==0){
+		clearLocations();
+		return 1;
+	}
+	interval=intervals[0];
+	node.action=SearchNode::terminal;
+	node.vertex_loc=interval.path_start;
+	node.read_pos=interval.read_start;
+	node.global_edit=0;
+	node.global_gap=0;
+	node.local_gap=0;
+	node.prev_pos=SearchNode::no_prev;
+	searchNodes[0]=node;
+	searchNodes_size=1;
+	active_start=0;
+	if(interval.type==backward)
+		backwardLimitSearch2(active_start,interval);
+	else if(interval.type==forward)
+		forwardLimitSearch2(active_start,interval);
+	else
+		middleLimitSearch2(active_start,interval);
+	for(i=1;i!=intervals_size;i++){
+		if(searchNodes_size==searchNodes_capacity){
+			clearLocations();
+			return 0;
+		}
+		if(valid_poses_size==0)
+			break;
+		interval=intervals[i];
+		active_start=searchNodes_size;
+		for(j=0;j!=valid_poses_size;j++){
+			pos=valid_poses[j];
+			node.action=SearchNode::start;
+			node.vertex_loc=interval.path_start;
+			node.read_pos=interval.read_start;
+			node.global_edit=searchNodes[pos].global_edit;
+			node.global_gap=searchNodes[pos].global_gap;
+			node.local_gap=0;
+			node.prev_pos=pos;
+			searchNodes[searchNodes_size++]=node;
+			if(searchNodes_size==searchNodes_capacity){
+				clearLocations();
+				return 0;
+			}
+		}
+		if(interval.type==forward)
+			forwardLimitSearch2(active_start,interval);
+		else
+			middleLimitSearch2(active_start,interval);
+	}
+	clearLocations();
+	return valid_poses_size;
+}
+void Graph::sortAlignments(int start,int end){
+	int i,j,pivot;
+	pivot=valid_poses[start];
+	i=start;j=end-1;
+	while(i<j){
+		while(i<j&&(searchNodes[valid_poses[j]].global_edit>searchNodes[pivot].global_edit||(searchNodes[valid_poses[j]].global_edit==searchNodes[pivot].global_edit&&searchNodes[valid_poses[j]].global_gap>searchNodes[pivot].global_gap)))
+			j--;
+		if(i==j)
+			break;
+		valid_poses[i]=valid_poses[j];
+		i++;
+		while(i<j&&(searchNodes[valid_poses[i]].global_edit<searchNodes[pivot].global_edit||(searchNodes[valid_poses[i]].global_edit==searchNodes[pivot].global_edit&&searchNodes[valid_poses[i]].global_gap<searchNodes[pivot].global_gap)))
+			i++;
+		if(i==j)
+			break;
+		valid_poses[j]=valid_poses[i];
+		j--;
+	}
+	valid_poses[i]=pivot;
+	if(start<i)
+	   sortAlignments(start,i);
+	if(i+1<end)
+	   sortAlignments(i+1,end);
+}
+void Graph::sortTempAlignments(int start,int end){
+	int i,j,pivot;
+	pivot=temp_alignments_poses[start];
+	i=start;j=end-1;
+	while(i<j){
+		while(i<j&&temp_alignments[temp_alignments_poses[j]].ref_pos>temp_alignments[pivot].ref_pos)
+			j--;
+		if(i==j)
+			break;
+		temp_alignments_poses[i]=temp_alignments_poses[j];
+		i++;
+		while(i<j&&temp_alignments[temp_alignments_poses[i]].ref_pos<temp_alignments[pivot].ref_pos)
+			i++;
+		if(i==j)
+			break;
+		temp_alignments_poses[j]=temp_alignments_poses[i];
+		j--;
+	}
+	temp_alignments_poses[i]=pivot;
+	if(start<i)
+		sortTempAlignments(start,i);
+	if(i+1<end)
+		sortTempAlignments(i+1,end);
+}
+void Graph::findBestPositions(){
+	int i,min_edit;
+	min_edit=0x7fffffff;
+	best_poses_size=0;
+	for(i=0;i!=valid_poses_size;i++){
+		if(searchNodes[valid_poses[i]].global_edit<min_edit){
+			best_poses[0]=valid_poses[i];
+			best_poses_size=1;
+			min_edit=searchNodes[valid_poses[i]].global_edit;
+		}
+		else if(searchNodes[valid_poses[i]].global_edit==min_edit){
+			best_poses[best_poses_size++]=valid_poses[i];
+		}
+	}
+}
+bool Graph::resolveAlignment(){
+	SearchNode * pNode;
+	int k,last_start,i,j;
+	int read_len,edit;
+	string sub_str;
+	char action;
+	read_len=read.length();
+	if(intervals_size==0){
+		result_size=pLookupString->verifyResult(read,result_poses);
+		if(result_size==0)
+			return false;
+		cigar_buf.assign(read_len,'=');
+		alignment.cigar=cigar_buf;
+		alignment.edit=0;
+		for(i=0;i!=result_size;i++){
+			alignment.start_pos=result_poses[i];
+			pRef_seq->countRefIndex(alignment,read_len);
+			if(alignment.ref_index!=-1)
+				return true;
+		}
+		return false;
+	}
+	findBestPositions();
+	if(intervals_size==1&&intervals[0].type==backward){
+		for(i=0;i!=best_poses_size;i++){
+			pNode=&searchNodes[best_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else {
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			read_buf.append(part_read_buf);
+			cigar_buf.append(part_cigar_buf);
+			read_buf.append(read.substr(intervals[0].read_start+1));
+			cigar_buf.append(read_len-intervals[0].read_start-1,'=');
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			for(j=0;j!=result_size;j++){
+				alignment.start_pos=result_poses[j];
+				pRef_seq->countRefIndex(alignment.ref_index,alignment.start_pos,cigar_buf,read_len);
+				if(alignment.ref_index!=-1){
+					alignment.cigar=cigar_buf;
+					alignment.edit=edit;
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+	if(intervals_size==1){
+		for(i=0;i!=best_poses_size;i++){
+			pNode=&searchNodes[best_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('=');
+					}
+					else if(action==SearchNode::mismatch){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('X');
+					}
+					else if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('D');
+					}
+					else {
+						part_cigar_buf.push_back('I');
+					}
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+				}
+				if(action==SearchNode::read_gap){
+					part_cigar_buf.push_back('D');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_cigar_buf.push_back('=');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				sub_str=read.substr(0,intervals[0].read_start);
+				read_buf.append(sub_str);
+				cigar_buf.append(intervals[0].read_start,'=');
+				reverse(part_read_buf.begin(),part_read_buf.end());
+				read_buf.append(part_read_buf);
+				reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+				cigar_buf.append(part_cigar_buf);
+				if(intervals[0].type==middle){
+					sub_str=read.substr(intervals[0].read_end);
+					read_buf.append(sub_str);
+					cigar_buf.append(read_len-intervals[0].read_end,'=');
+				}
+				result_size=pLookupString->verifyResult(read_buf,result_poses);
+				if(result_size==0)
+					continue;
+				for(j=0;j!=result_size;j++){
+					alignment.start_pos=result_poses[j];
+					pRef_seq->countRefIndex(alignment.ref_index,alignment.start_pos,cigar_buf,read_len);
+					if(alignment.ref_index!=-1){
+						alignment.cigar=cigar_buf;
+						alignment.edit=edit;
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+		for(i=0;i!=best_poses_size;i++){
+			k=intervals_size-1;
+			read_buf.clear();
+			cigar_buf.clear();
+			if(intervals[k].type==middle){
+				sub_str=read.substr(intervals[k].read_end);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(read_len-intervals[k].read_end,'=');
+			}
+			last_start=-1;
+			pNode=&searchNodes[best_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			part_cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(pNode->action==SearchNode::start){
+					if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('D');
+					}
+					else if(action==SearchNode::path_gap){
+						part_cigar_buf.push_back('I');
+					}
+					else{
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('=');
+					}
+					if(last_start==-1){
+						last_start=intervals[k].read_start;
+					}
+					else{
+						sub_str=read.substr(intervals[k].read_end,last_start-intervals[k].read_end);
+						reverse(sub_str.begin(),sub_str.end());
+						read_buf.append(sub_str);
+						cigar_buf.append(last_start-intervals[k].read_end,'=');
+						last_start=intervals[k].read_start;
+					}
+					read_buf.append(part_read_buf);
+					cigar_buf.append(part_cigar_buf);
+					part_read_buf.clear();
+					part_cigar_buf.clear();
+					k--;
+					if(k==0){
+						action=pNode->action;
+						pNode=&searchNodes[pNode->prev_pos];
+						break;
+					}
+				}
+				else if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(intervals[0].type==backward){
+				while(pNode->action!=SearchNode::terminal){
+					if(action==SearchNode::match){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+						part_cigar_buf.push_back('=');
+					}
+					else if(action==SearchNode::mismatch){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+						part_cigar_buf.push_back('X');
+					}
+					else if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+						part_cigar_buf.push_back('D');
+					}
+					else if(action==SearchNode::path_gap){
+						part_cigar_buf.push_back('I');
+					}
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+				}
+				if(action==SearchNode::read_gap){
+					part_cigar_buf.push_back('D');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_cigar_buf.push_back('=');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+				}
+				sub_str=read.substr(intervals[0].read_start+1,last_start-intervals[0].read_start-1);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(last_start-intervals[0].read_start-1,'=');
+				reverse(part_read_buf.begin(),part_read_buf.end());
+				read_buf.append(part_read_buf);
+				reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+				cigar_buf.append(part_cigar_buf);
+			}
+			else{
+				while(pNode->action!=SearchNode::terminal){
+					if(action==SearchNode::match){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('=');
+					}
+					else if(action==SearchNode::mismatch){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('X');
+					}
+					else if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('D');
+					}
+					else if(action==SearchNode::path_gap){
+						part_cigar_buf.push_back('I');
+					}
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+				}
+				if(action==SearchNode::read_gap){
+					part_cigar_buf.push_back('D');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_cigar_buf.push_back('=');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				sub_str=read.substr(intervals[0].read_end,last_start-intervals[0].read_end);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(last_start-intervals[0].read_end,'=');
+				read_buf.append(part_read_buf);
+				cigar_buf.append(part_cigar_buf);
+				sub_str=read.substr(0,intervals[0].read_start);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(intervals[0].read_start,'=');
+			}
+			reverse(read_buf.begin(),read_buf.end());
+			reverse(cigar_buf.begin(),cigar_buf.end());
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			for(j=0;j!=result_size;j++){
+				alignment.start_pos=result_poses[j];
+				pRef_seq->countRefIndex(alignment.ref_index,alignment.start_pos,cigar_buf,read_len);
+				if(alignment.ref_index!=-1){
+					alignment.cigar=cigar_buf;
+					alignment.edit=edit;
+					return true;
+				}
+			}
+		}
+	return false;
+}
+bool Graph::resolveLimitAlignment(){
+	SearchNode * pNode;
+	int k,last_start,i,j;
+	int read_len,edit;
+	string sub_str;
+	char action;
+	read_len=read.length();
+	if(intervals_size==0){
+		result_size=pLookupString->verifyResult(read,result_poses);
+		if(result_size==0)
+			return false;
+		cigar_buf.assign(read_len,'=');
+		alignment.cigar=cigar_buf;
+		alignment.edit=0;
+		for(i=0;i!=result_size;i++){
+			if(abs(approximate_start-result_poses[i])>Configure::global_max_gap)
+				continue;
+			alignment.start_pos=result_poses[i];
+			pRef_seq->countRefIndex(alignment,read_len);
+			if(alignment.ref_index==-1)
+				continue;
+			return true;
+		}
+		return false;
+	}
+	if(valid_poses_size>1)
+		sortAlignments(0,valid_poses_size);
+	if(intervals_size==1&&intervals[0].type==backward){
+		for(i=0;i!=valid_poses_size;i++){
+			pNode=&searchNodes[valid_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else {
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			read_buf.append(part_read_buf);
+			cigar_buf.append(part_cigar_buf);
+			read_buf.append(read.substr(intervals[0].read_start+1));
+			cigar_buf.append(read_len-intervals[0].read_start-1,'=');
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			for(j=0;j!=result_size;j++){
+				if(abs(approximate_start-result_poses[j])>Configure::global_max_gap)
+					continue;
+				alignment.start_pos=result_poses[j];
+				pRef_seq->countRefIndex(alignment.ref_index,alignment.start_pos,cigar_buf,read_len);
+				if(alignment.ref_index==-1)
+					continue;
+				alignment.cigar=cigar_buf;
+				alignment.edit=edit;
+				return true;
+			}
+		}
+		return false;
+	}
+	if(intervals_size==1){
+		for(i=0;i!=valid_poses_size;i++){
+			pNode=&searchNodes[valid_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('=');
+					}
+					else if(action==SearchNode::mismatch){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('X');
+					}
+					else if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('D');
+					}
+					else {
+						part_cigar_buf.push_back('I');
+					}
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+				}
+				if(action==SearchNode::read_gap){
+					part_cigar_buf.push_back('D');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_cigar_buf.push_back('=');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				sub_str=read.substr(0,intervals[0].read_start);
+				read_buf.append(sub_str);
+				cigar_buf.append(intervals[0].read_start,'=');
+				reverse(part_read_buf.begin(),part_read_buf.end());
+				read_buf.append(part_read_buf);
+				reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+				cigar_buf.append(part_cigar_buf);
+				if(intervals[0].type==middle){
+					sub_str=read.substr(intervals[0].read_end);
+					read_buf.append(sub_str);
+					cigar_buf.append(read_len-intervals[0].read_end,'=');
+				}
+				result_size=pLookupString->verifyResult(read_buf,result_poses);
+				if(result_size==0)
+					continue;
+				for(j=0;j!=result_size;j++){
+					if(abs(approximate_start-result_poses[j])>Configure::global_max_gap)
+							continue;
+					alignment.start_pos=result_poses[j];
+					pRef_seq->countRefIndex(alignment.ref_index,alignment.start_pos,cigar_buf,read_len);
+					if(alignment.ref_index==-1)
+						continue;
+					alignment.cigar=cigar_buf;
+					alignment.edit=edit;
+					return true;
+				}
+			}
+			return false;
+		}
+		for(i=0;i!=valid_poses_size;i++){
+			k=intervals_size-1;
+			read_buf.clear();
+			cigar_buf.clear();
+			if(intervals[k].type==middle){
+				sub_str=read.substr(intervals[k].read_end);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(read_len-intervals[k].read_end,'=');
+			}
+			last_start=-1;
+			pNode=&searchNodes[valid_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			part_cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(pNode->action==SearchNode::start){
+					if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('D');
+					}
+					else if(action==SearchNode::path_gap){
+						part_cigar_buf.push_back('I');
+					}
+					else{
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('=');
+					}
+					if(last_start==-1){
+						last_start=intervals[k].read_start;
+					}
+					else{
+						sub_str=read.substr(intervals[k].read_end,last_start-intervals[k].read_end);
+						reverse(sub_str.begin(),sub_str.end());
+						read_buf.append(sub_str);
+						cigar_buf.append(last_start-intervals[k].read_end,'=');
+						last_start=intervals[k].read_start;
+					}
+					read_buf.append(part_read_buf);
+					cigar_buf.append(part_cigar_buf);
+					part_read_buf.clear();
+					part_cigar_buf.clear();
+					k--;
+					if(k==0){
+						action=pNode->action;
+						pNode=&searchNodes[pNode->prev_pos];
+						break;
+					}
+				}
+				else if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(intervals[0].type==backward){
+				while(pNode->action!=SearchNode::terminal){
+					if(action==SearchNode::match){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+						part_cigar_buf.push_back('=');
+					}
+					else if(action==SearchNode::mismatch){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+						part_cigar_buf.push_back('X');
+					}
+					else if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+						part_cigar_buf.push_back('D');
+					}
+					else if(action==SearchNode::path_gap){
+						part_cigar_buf.push_back('I');
+					}
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+				}
+				if(action==SearchNode::read_gap){
+					part_cigar_buf.push_back('D');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_cigar_buf.push_back('=');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+				}
+				sub_str=read.substr(intervals[0].read_start+1,last_start-intervals[0].read_start-1);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(last_start-intervals[0].read_start-1,'=');
+				reverse(part_read_buf.begin(),part_read_buf.end());
+				read_buf.append(part_read_buf);
+				reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+				cigar_buf.append(part_cigar_buf);
+			}
+			else{
+				while(pNode->action!=SearchNode::terminal){
+					if(action==SearchNode::match){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('=');
+					}
+					else if(action==SearchNode::mismatch){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('X');
+					}
+					else if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('D');
+					}
+					else if(action==SearchNode::path_gap){
+						part_cigar_buf.push_back('I');
+					}
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+				}
+				if(action==SearchNode::read_gap){
+					part_cigar_buf.push_back('D');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_cigar_buf.push_back('=');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				sub_str=read.substr(intervals[0].read_end,last_start-intervals[0].read_end);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(last_start-intervals[0].read_end,'=');
+				read_buf.append(part_read_buf);
+				cigar_buf.append(part_cigar_buf);
+				sub_str=read.substr(0,intervals[0].read_start);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(intervals[0].read_start,'=');
+			}
+			reverse(read_buf.begin(),read_buf.end());
+			reverse(cigar_buf.begin(),cigar_buf.end());
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			for(j=0;j!=result_size;j++){
+				if(abs(approximate_start-result_poses[j])>Configure::global_max_gap)
+					continue;
+				alignment.start_pos=result_poses[j];
+				pRef_seq->countRefIndex(alignment.ref_index,alignment.start_pos,cigar_buf,read_len);
+				if(alignment.ref_index==-1)
+					continue;
+				alignment.cigar=cigar_buf;
+				alignment.edit=edit;
+				return true;
+			}
+		}
+	return false;
+}
+bool Graph::resolveLimitAlignment(NaiveAlignmentFormat & n_alignment){
+	SearchNode * pNode;
+	int k,last_start,i,j;
+	int read_len,edit;
+	string sub_str;
+	char action;
+	read_len=read.length();
+	if(intervals_size==0){
+		result_size=pLookupString->verifyResult(read,result_poses);
+		if(result_size==0)
+			return false;
+		cigar_buf.assign(read_len,'=');
+		n_alignment.cigar=cigar_buf;
+		n_alignment.edit=0;
+		n_alignment.ref_read_len=read_len;
+		for(i=0;i!=result_size;i++){
+			if(abs(approximate_start-result_poses[i])>Configure::global_max_gap)
+				continue;
+			n_alignment.ref_pos=result_poses[i];
+			return true;
+		}
+		return false;
+	}
+	if(valid_poses_size>1)
+		sortAlignments(0,valid_poses_size);
+	if(intervals_size==1&&intervals[0].type==backward){
+		for(i=0;i!=valid_poses_size;i++){
+			pNode=&searchNodes[valid_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else {
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			read_buf.append(part_read_buf);
+			cigar_buf.append(part_cigar_buf);
+			read_buf.append(read.substr(intervals[0].read_start+1));
+			cigar_buf.append(read_len-intervals[0].read_start-1,'=');
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			for(j=0;j!=result_size;j++){
+				if(abs(approximate_start-result_poses[j])>Configure::global_max_gap)
+						continue;
+				n_alignment.ref_pos=result_poses[j];
+				n_alignment.cigar=cigar_buf;
+				n_alignment.edit=edit;
+				n_alignment.ref_read_len=read_buf.length();
+				return true;
+			}
+		}
+		return false;
+	}
+	if(intervals_size==1){
+		for(i=0;i!=valid_poses_size;i++){
+			pNode=&searchNodes[valid_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('=');
+					}
+					else if(action==SearchNode::mismatch){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('X');
+					}
+					else if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('D');
+					}
+					else {
+						part_cigar_buf.push_back('I');
+					}
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+				}
+				if(action==SearchNode::read_gap){
+					part_cigar_buf.push_back('D');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_cigar_buf.push_back('=');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				sub_str=read.substr(0,intervals[0].read_start);
+				read_buf.append(sub_str);
+				cigar_buf.append(intervals[0].read_start,'=');
+				reverse(part_read_buf.begin(),part_read_buf.end());
+				read_buf.append(part_read_buf);
+				reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+				cigar_buf.append(part_cigar_buf);
+				if(intervals[0].type==middle){
+					sub_str=read.substr(intervals[0].read_end);
+					read_buf.append(sub_str);
+					cigar_buf.append(read_len-intervals[0].read_end,'=');
+				}
+				result_size=pLookupString->verifyResult(read_buf,result_poses);
+				if(result_size==0)
+					continue;
+				for(j=0;j!=result_size;j++){
+					if(abs(approximate_start-result_poses[j])>Configure::global_max_gap)
+							continue;
+					n_alignment.ref_pos=result_poses[j];
+					n_alignment.cigar=cigar_buf;
+					n_alignment.edit=edit;
+					n_alignment.ref_read_len=read_buf.length();
+					return true;
+				}
+			}
+			return false;
+		}
+		for(i=0;i!=valid_poses_size;i++){
+			k=intervals_size-1;
+			read_buf.clear();
+			cigar_buf.clear();
+			if(intervals[k].type==middle){
+				sub_str=read.substr(intervals[k].read_end);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(read_len-intervals[k].read_end,'=');
+			}
+			last_start=-1;
+			pNode=&searchNodes[valid_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			part_cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(pNode->action==SearchNode::start){
+					if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('D');
+					}
+					else if(action==SearchNode::path_gap){
+						part_cigar_buf.push_back('I');
+					}
+					else{
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('=');
+					}
+					if(last_start==-1){
+						last_start=intervals[k].read_start;
+					}
+					else{
+						sub_str=read.substr(intervals[k].read_end,last_start-intervals[k].read_end);
+						reverse(sub_str.begin(),sub_str.end());
+						read_buf.append(sub_str);
+						cigar_buf.append(last_start-intervals[k].read_end,'=');
+						last_start=intervals[k].read_start;
+					}
+					read_buf.append(part_read_buf);
+					cigar_buf.append(part_cigar_buf);
+					part_read_buf.clear();
+					part_cigar_buf.clear();
+					k--;
+					if(k==0){
+						action=pNode->action;
+						pNode=&searchNodes[pNode->prev_pos];
+						break;
+					}
+				}
+				else if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(intervals[0].type==backward){
+				while(pNode->action!=SearchNode::terminal){
+					if(action==SearchNode::match){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+						part_cigar_buf.push_back('=');
+					}
+					else if(action==SearchNode::mismatch){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+						part_cigar_buf.push_back('X');
+					}
+					else if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+						part_cigar_buf.push_back('D');
+					}
+					else if(action==SearchNode::path_gap){
+						part_cigar_buf.push_back('I');
+					}
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+				}
+				if(action==SearchNode::read_gap){
+					part_cigar_buf.push_back('D');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_cigar_buf.push_back('=');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+				}
+				sub_str=read.substr(intervals[0].read_start+1,last_start-intervals[0].read_start-1);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(last_start-intervals[0].read_start-1,'=');
+				reverse(part_read_buf.begin(),part_read_buf.end());
+				read_buf.append(part_read_buf);
+				reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+				cigar_buf.append(part_cigar_buf);
+			}
+			else{
+				while(pNode->action!=SearchNode::terminal){
+					if(action==SearchNode::match){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('=');
+					}
+					else if(action==SearchNode::mismatch){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('X');
+					}
+					else if(action==SearchNode::read_gap){
+						part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+						part_cigar_buf.push_back('D');
+					}
+					else if(action==SearchNode::path_gap){
+						part_cigar_buf.push_back('I');
+					}
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+				}
+				if(action==SearchNode::read_gap){
+					part_cigar_buf.push_back('D');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_cigar_buf.push_back('=');
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				}
+				sub_str=read.substr(intervals[0].read_end,last_start-intervals[0].read_end);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(last_start-intervals[0].read_end,'=');
+				read_buf.append(part_read_buf);
+				cigar_buf.append(part_cigar_buf);
+				sub_str=read.substr(0,intervals[0].read_start);
+				reverse(sub_str.begin(),sub_str.end());
+				read_buf.append(sub_str);
+				cigar_buf.append(intervals[0].read_start,'=');
+			}
+			reverse(read_buf.begin(),read_buf.end());
+			reverse(cigar_buf.begin(),cigar_buf.end());
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			for(j=0;j!=result_size;j++){
+				if(abs(approximate_start-result_poses[j])>Configure::global_max_gap)
+						continue;
+					n_alignment.ref_pos=result_poses[j];
+					n_alignment.cigar=cigar_buf;
+					n_alignment.edit=edit;
+					n_alignment.ref_read_len=read_buf.length();
+				return true;
+			}
+		}
+	return false;
+}
+int Graph::resolveAlignments(NaiveAlignmentFormat * alignments){
+	SearchNode * pNode;
+	int k,last_start,i,j;
+	int read_len,edit;
+	int prev_pos,current_pos;
+	string sub_str;
+	char action;
+	NaiveAlignmentFormat temp_alignment;
+	int alignments_size;
+	read_len=read.length();
+	temp_alignments_size=0;
+	alignments_size=0;
+	if(intervals_size==0){
+		result_size=pLookupString->verifyResult(read,result_poses);
+		if(result_size==0)
+			return 0;
+		temp_alignment.cigar.assign(read_len,'=');
+		temp_alignment.edit=0;
+		temp_alignment.ref_read_len=read_len;
+		for(j=0;j!=result_size;j++){
+			temp_alignment.ref_pos=result_poses[j];
+			temp_alignments[temp_alignments_size++]=temp_alignment;
+			if(temp_alignments_size==temp_alignments_capacity)
+					break;
+		}
+		if(!temp_alignments_size)
+			return 0;
+		if(temp_alignments_size>1){
+			for(j=0;j!=temp_alignments_size;j++)
+				temp_alignments_poses[j]=j;
+			sortTempAlignments(0,temp_alignments_size);
+		}
+		else
+			temp_alignments_poses[0]=0;
+		prev_pos=temp_alignments[temp_alignments_poses[0]].ref_pos;
+		alignments[alignments_size++]=temp_alignments[temp_alignments_poses[0]];
+		for(j=1;j!=temp_alignments_size;j++){
+			current_pos=temp_alignments[temp_alignments_poses[j]].ref_pos;
+			if(current_pos-prev_pos>Configure::global_max_gap){
+				alignments[alignments_size++]=temp_alignments[temp_alignments_poses[j]];
+				if(alignments_size==Configure::max_local_results)
+					break;
+				prev_pos=current_pos;
+			}
+		}
+		return alignments_size;
+	}
+	if(intervals_size==1&&intervals[0].type==backward){
+		for(i=0;i!=valid_poses_size;i++){
+			pNode=&searchNodes[valid_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else {
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			read_buf.append(part_read_buf);
+			cigar_buf.append(part_cigar_buf);
+			read_buf.append(read.substr(intervals[0].read_start+1));
+			cigar_buf.append(read_len-intervals[0].read_start-1,'=');
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			for(j=0;j!=result_size;j++){
+				temp_alignment.cigar=cigar_buf;
+				temp_alignment.edit=edit;
+				temp_alignment.ref_pos=result_poses[j];
+				temp_alignment.ref_read_len=read_buf.length();
+				temp_alignments[temp_alignments_size++]=temp_alignment;
+				if(temp_alignments_size==temp_alignments_capacity)
+					break;
+			}
+			if(temp_alignments_size==temp_alignments_capacity)
+				break;
+		}
+		if(!temp_alignments_size)
+			return 0;
+		if(temp_alignments_size>1){
+			for(j=0;j!=temp_alignments_size;j++)
+				temp_alignments_poses[j]=j;
+			sortTempAlignments(0,temp_alignments_size);
+		}
+		else
+			temp_alignments_poses[0]=0;
+		prev_pos=temp_alignments[temp_alignments_poses[0]].ref_pos;
+		alignments[alignments_size++]=temp_alignments[temp_alignments_poses[0]];
+		for(j=1;j!=temp_alignments_size;j++){
+			current_pos=temp_alignments[temp_alignments_poses[j]].ref_pos;
+			if(current_pos-prev_pos>Configure::global_max_gap){
+				alignments[alignments_size++]=temp_alignments[temp_alignments_poses[j]];
+				if(alignments_size==Configure::max_local_results)
+					break;
+				prev_pos=current_pos;
+			}
+		}
+		return alignments_size;
+	}
+	if(intervals_size==1){
+		for(i=0;i!=valid_poses_size;i++){
+			pNode=&searchNodes[valid_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else {
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			sub_str=read.substr(0,intervals[0].read_start);
+			read_buf.append(sub_str);
+			cigar_buf.append(intervals[0].read_start,'=');
+			reverse(part_read_buf.begin(),part_read_buf.end());
+			read_buf.append(part_read_buf);
+			reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+			cigar_buf.append(part_cigar_buf);
+			if(intervals[0].type==middle){
+				sub_str=read.substr(intervals[0].read_end);
+				read_buf.append(sub_str);
+				cigar_buf.append(read_len-intervals[0].read_end,'=');
+			}
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			for(j=0;j!=result_size;j++){
+				temp_alignment.cigar=cigar_buf;
+				temp_alignment.edit=edit;
+				temp_alignment.ref_pos=result_poses[j];
+				temp_alignment.ref_read_len=read_buf.length();
+				temp_alignments[temp_alignments_size++]=temp_alignment;
+				if(temp_alignments_size==temp_alignments_capacity)
+					break;
+			}
+			if(temp_alignments_size==temp_alignments_capacity)
+				break;
+		}
+		if(!temp_alignments_size)
+			return 0;
+		if(temp_alignments_size>1){
+			for(j=0;j!=temp_alignments_size;j++)
+				temp_alignments_poses[j]=j;
+			sortTempAlignments(0,temp_alignments_size);
+		}
+		else
+			temp_alignments_poses[0]=0;
+		prev_pos=temp_alignments[temp_alignments_poses[0]].ref_pos;
+		alignments[alignments_size++]=temp_alignments[temp_alignments_poses[0]];
+		for(j=1;j!=temp_alignments_size;j++){
+			current_pos=temp_alignments[temp_alignments_poses[j]].ref_pos;
+			if(current_pos-prev_pos>Configure::global_max_gap){
+				alignments[alignments_size++]=temp_alignments[temp_alignments_poses[j]];
+				if(alignments_size==Configure::max_local_results)
+					break;
+				prev_pos=current_pos;
+			}
+		}
+		return alignments_size;
+	}
+	for(i=0;i!=valid_poses_size;i++){
+		read_buf.clear();
+		cigar_buf.clear();
+		k=intervals_size-1;
+		if(intervals[k].type==middle){
+			read_buf.clear();
+			cigar_buf.clear();
+			sub_str=read.substr(intervals[k].read_end);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(read_len-intervals[k].read_end,'=');
+		}
+		last_start=-1;
+		part_read_buf.clear();
+		part_cigar_buf.clear();
+		pNode=&searchNodes[valid_poses[i]];
+		edit=pNode->global_edit;
+		action=pNode->action;
+		pNode=&searchNodes[pNode->prev_pos];
+		while(pNode->action!=SearchNode::terminal){
+			if(pNode->action==SearchNode::start){
+				if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				if(last_start==-1){
+					last_start=intervals[k].read_start;
+				}
+				else{
+					sub_str=read.substr(intervals[k].read_end,last_start-intervals[k].read_end);
+					reverse(sub_str.begin(),sub_str.end());
+					read_buf.append(sub_str);
+					cigar_buf.append(last_start-intervals[k].read_end,'=');
+					last_start=intervals[k].read_start;
+				}
+				read_buf.append(part_read_buf);
+				cigar_buf.append(part_cigar_buf);
+				part_read_buf.clear();
+				part_cigar_buf.clear();
+				k--;
+				if(k==0){
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+					break;
+				}
+			}
+			else if(action==SearchNode::match){
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('=');
+			}
+			else if(action==SearchNode::mismatch){
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('X');
+			}
+			else if(action==SearchNode::read_gap){
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('D');
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+		}
+		if(intervals[0].type==backward){
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			sub_str=read.substr(intervals[0].read_start+1,last_start-intervals[0].read_start-1);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(last_start-intervals[0].read_start-1,'=');
+			reverse(part_read_buf.begin(),part_read_buf.end());
+			read_buf.append(part_read_buf);
+			reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+			cigar_buf.append(part_cigar_buf);
+		}
+		else{
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			sub_str=read.substr(intervals[0].read_end,last_start-intervals[0].read_end);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(last_start-intervals[0].read_end,'=');
+			read_buf.append(part_read_buf);
+			cigar_buf.append(part_cigar_buf);
+			sub_str=read.substr(0,intervals[0].read_start);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(intervals[0].read_start,'=');
+		}
+		reverse(read_buf.begin(),read_buf.end());
+		reverse(cigar_buf.begin(),cigar_buf.end());
+		result_size=pLookupString->verifyResult(read_buf,result_poses);
+		if(result_size==0)
+			continue;
+		for(j=0;j!=result_size;j++){
+			temp_alignment.cigar=cigar_buf;
+			temp_alignment.edit=edit;
+			temp_alignment.ref_pos=result_poses[j];
+			temp_alignment.ref_read_len=read_buf.length();
+			temp_alignments[temp_alignments_size++]=temp_alignment;
+			if(temp_alignments_size==temp_alignments_capacity)
+				break;
+		}
+		if(temp_alignments_size==temp_alignments_capacity)
+			break;
+	}
+	if(!temp_alignments_size)
+		return 0;
+	if(temp_alignments_size>1){
+		for(j=0;j!=temp_alignments_size;j++)
+			temp_alignments_poses[j]=j;
+		sortTempAlignments(0,temp_alignments_size);
+	}
+	else
+		temp_alignments_poses[0]=0;
+	prev_pos=temp_alignments[temp_alignments_poses[0]].ref_pos;
+	alignments[alignments_size++]=temp_alignments[temp_alignments_poses[0]];
+	for(j=1;j!=temp_alignments_size;j++){
+		current_pos=temp_alignments[temp_alignments_poses[j]].ref_pos;
+		if(current_pos-prev_pos>Configure::global_max_gap){
+			alignments[alignments_size++]=temp_alignments[temp_alignments_poses[j]];
+			if(alignments_size==Configure::max_local_results)
+				break;
+			prev_pos=current_pos;
+		}
+	}
+	return alignments_size;
+}
+int Graph::resolveBestAlignments(NaiveAlignmentFormat * alignments){
+	SearchNode * pNode;
+	int k,last_start,i,j;
+	int read_len,edit;
+	int prev_pos,current_pos;
+	string sub_str;
+	char action;
+	NaiveAlignmentFormat temp_alignment;
+	int alignments_size;
+	read_len=read.length();
+	temp_alignments_size=0;
+	alignments_size=0;
+	if(intervals_size==0){
+		result_size=pLookupString->verifyResult(read,result_poses);
+		if(result_size==0)
+			return 0;
+		temp_alignment.cigar.assign(read_len,'=');
+		temp_alignment.edit=0;
+		temp_alignment.ref_read_len=read_len;
+		for(j=0;j!=result_size;j++){
+			temp_alignment.ref_pos=result_poses[j];
+			temp_alignments[temp_alignments_size++]=temp_alignment;
+			if(temp_alignments_size==temp_alignments_capacity)
+					break;
+		}
+		if(!temp_alignments_size)
+			return 0;
+		if(temp_alignments_size>1){
+			for(j=0;j!=temp_alignments_size;j++)
+				temp_alignments_poses[j]=j;
+			sortTempAlignments(0,temp_alignments_size);
+		}
+		else
+			temp_alignments_poses[0]=0;
+		prev_pos=temp_alignments[temp_alignments_poses[0]].ref_pos;
+		alignments[alignments_size++]=temp_alignments[temp_alignments_poses[0]];
+		for(j=1;j!=temp_alignments_size;j++){
+			current_pos=temp_alignments[temp_alignments_poses[j]].ref_pos;
+			if(current_pos-prev_pos>Configure::global_max_gap){
+				alignments[alignments_size++]=temp_alignments[temp_alignments_poses[j]];
+				if(alignments_size==Configure::max_local_results)
+					break;
+				prev_pos=current_pos;
+			}
+		}
+		return alignments_size;
+	}
+	findBestPositions();
+	if(intervals_size==1&&intervals[0].type==backward){
+		for(i=0;i!=best_poses_size;i++){
+			pNode=&searchNodes[best_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else {
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			read_buf.append(part_read_buf);
+			cigar_buf.append(part_cigar_buf);
+			read_buf.append(read.substr(intervals[0].read_start+1));
+			cigar_buf.append(read_len-intervals[0].read_start-1,'=');
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			for(j=0;j!=result_size;j++){
+				temp_alignment.cigar=cigar_buf;
+				temp_alignment.edit=edit;
+				temp_alignment.ref_pos=result_poses[j];
+				temp_alignment.ref_read_len=read_buf.length();
+				temp_alignments[temp_alignments_size++]=temp_alignment;
+				if(temp_alignments_size==temp_alignments_capacity)
+					break;
+			}
+			if(temp_alignments_size==temp_alignments_capacity)
+				break;
+		}
+		if(!temp_alignments_size)
+			return 0;
+		if(temp_alignments_size>1){
+			for(j=0;j!=temp_alignments_size;j++)
+				temp_alignments_poses[j]=j;
+			sortTempAlignments(0,temp_alignments_size);
+		}
+		else
+			temp_alignments_poses[0]=0;
+		prev_pos=temp_alignments[temp_alignments_poses[0]].ref_pos;
+		alignments[alignments_size++]=temp_alignments[temp_alignments_poses[0]];
+		for(j=1;j!=temp_alignments_size;j++){
+			current_pos=temp_alignments[temp_alignments_poses[j]].ref_pos;
+			if(current_pos-prev_pos>Configure::global_max_gap){
+				alignments[alignments_size++]=temp_alignments[temp_alignments_poses[j]];
+				if(alignments_size==Configure::max_local_results)
+					break;
+				prev_pos=current_pos;
+			}
+		}
+		return alignments_size;
+	}
+	if(intervals_size==1){
+		for(i=0;i!=best_poses_size;i++){
+			pNode=&searchNodes[best_poses[i]];
+			edit=pNode->global_edit;
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else {
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			sub_str=read.substr(0,intervals[0].read_start);
+			read_buf.append(sub_str);
+			cigar_buf.append(intervals[0].read_start,'=');
+			reverse(part_read_buf.begin(),part_read_buf.end());
+			read_buf.append(part_read_buf);
+			reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+			cigar_buf.append(part_cigar_buf);
+			if(intervals[0].type==middle){
+				sub_str=read.substr(intervals[0].read_end);
+				read_buf.append(sub_str);
+				cigar_buf.append(read_len-intervals[0].read_end,'=');
+			}
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			for(j=0;j!=result_size;j++){
+				temp_alignment.cigar=cigar_buf;
+				temp_alignment.edit=edit;
+				temp_alignment.ref_pos=result_poses[j];
+				temp_alignment.ref_read_len=read_buf.length();
+				temp_alignments[temp_alignments_size++]=temp_alignment;
+				if(temp_alignments_size==temp_alignments_capacity)
+					break;
+			}
+			if(temp_alignments_size==temp_alignments_capacity)
+				break;
+		}
+		if(!temp_alignments_size)
+			return 0;
+		if(temp_alignments_size>1){
+			for(j=0;j!=temp_alignments_size;j++)
+				temp_alignments_poses[j]=j;
+			sortTempAlignments(0,temp_alignments_size);
+		}
+		else
+			temp_alignments_poses[0]=0;
+		prev_pos=temp_alignments[temp_alignments_poses[0]].ref_pos;
+		alignments[alignments_size++]=temp_alignments[temp_alignments_poses[0]];
+		for(j=1;j!=temp_alignments_size;j++){
+			current_pos=temp_alignments[temp_alignments_poses[j]].ref_pos;
+			if(current_pos-prev_pos>Configure::global_max_gap){
+				alignments[alignments_size++]=temp_alignments[temp_alignments_poses[j]];
+				if(alignments_size==Configure::max_local_results)
+					break;
+				prev_pos=current_pos;
+			}
+		}
+		return alignments_size;
+	}
+	for(i=0;i!=best_poses_size;i++){
+		read_buf.clear();
+		cigar_buf.clear();
+		k=intervals_size-1;
+		if(intervals[k].type==middle){
+			read_buf.clear();
+			cigar_buf.clear();
+			sub_str=read.substr(intervals[k].read_end);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(read_len-intervals[k].read_end,'=');
+		}
+		last_start=-1;
+		part_read_buf.clear();
+		part_cigar_buf.clear();
+		pNode=&searchNodes[best_poses[i]];
+		edit=pNode->global_edit;
+		action=pNode->action;
+		pNode=&searchNodes[pNode->prev_pos];
+		while(pNode->action!=SearchNode::terminal){
+			if(pNode->action==SearchNode::start){
+				if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				if(last_start==-1){
+					last_start=intervals[k].read_start;
+				}
+				else{
+					sub_str=read.substr(intervals[k].read_end,last_start-intervals[k].read_end);
+					reverse(sub_str.begin(),sub_str.end());
+					read_buf.append(sub_str);
+					cigar_buf.append(last_start-intervals[k].read_end,'=');
+					last_start=intervals[k].read_start;
+				}
+				read_buf.append(part_read_buf);
+				cigar_buf.append(part_cigar_buf);
+				part_read_buf.clear();
+				part_cigar_buf.clear();
+				k--;
+				if(k==0){
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+					break;
+				}
+			}
+			else if(action==SearchNode::match){
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('=');
+			}
+			else if(action==SearchNode::mismatch){
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('X');
+			}
+			else if(action==SearchNode::read_gap){
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('D');
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+		}
+		if(intervals[0].type==backward){
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			sub_str=read.substr(intervals[0].read_start+1,last_start-intervals[0].read_start-1);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(last_start-intervals[0].read_start-1,'=');
+			reverse(part_read_buf.begin(),part_read_buf.end());
+			read_buf.append(part_read_buf);
+			reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+			cigar_buf.append(part_cigar_buf);
+		}
+		else{
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			sub_str=read.substr(intervals[0].read_end,last_start-intervals[0].read_end);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(last_start-intervals[0].read_end,'=');
+			read_buf.append(part_read_buf);
+			cigar_buf.append(part_cigar_buf);
+			sub_str=read.substr(0,intervals[0].read_start);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(intervals[0].read_start,'=');
+		}
+		reverse(read_buf.begin(),read_buf.end());
+		reverse(cigar_buf.begin(),cigar_buf.end());
+		result_size=pLookupString->verifyResult(read_buf,result_poses);
+		if(result_size==0)
+			continue;
+		for(j=0;j!=result_size;j++){
+			temp_alignment.cigar=cigar_buf;
+			temp_alignment.edit=edit;
+			temp_alignment.ref_pos=result_poses[j];
+			temp_alignment.ref_read_len=read_buf.length();
+			temp_alignments[temp_alignments_size++]=temp_alignment;
+			if(temp_alignments_size==temp_alignments_capacity)
+				break;
+		}
+		if(temp_alignments_size==temp_alignments_capacity)
+			break;
+	}
+	if(!temp_alignments_size)
+		return 0;
+	if(temp_alignments_size>1){
+		for(j=0;j!=temp_alignments_size;j++)
+			temp_alignments_poses[j]=j;
+		sortTempAlignments(0,temp_alignments_size);
+	}
+	else
+		temp_alignments_poses[0]=0;
+	prev_pos=temp_alignments[temp_alignments_poses[0]].ref_pos;
+	alignments[alignments_size++]=temp_alignments[temp_alignments_poses[0]];
+	for(j=1;j!=temp_alignments_size;j++){
+		current_pos=temp_alignments[temp_alignments_poses[j]].ref_pos;
+		if(current_pos-prev_pos>Configure::global_max_gap){
+			alignments[alignments_size++]=temp_alignments[temp_alignments_poses[j]];
+			if(alignments_size==Configure::max_local_results)
+				break;
+			prev_pos=current_pos;
+		}
+	}
+	return alignments_size;
+}
+void Graph::forwardLimitSearch(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i,delta;
+	bool has_next;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(valid_poses_size!=Configure::max_local_results){
+				valid_poses[valid_poses_size]=active_start;
+				valid_poses_size++;
+			}
+			else
+				return;
+			active_start++;
+			continue;
+		}
+		if(node.vertex_loc==-1){
+			delta=interval.read_end-node.read_pos;
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+delta<=Configure::local_max_gap&&node.global_gap+delta<=Configure::global_max_gap&&node.local_edit+delta<=interval.max_edit&&node.global_edit+delta<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos==interval.read_end-1){
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];
+		if(node.local_gap==0){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					has_next=false;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						has_next=true;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(!has_next){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					has_next=false;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						has_next=true;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(!has_next){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos++;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				has_next=false;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+					has_next=true;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(!has_next){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				has_next=false;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					if(((vertices[new_node.vertex_loc].in_count&Vertex::set_flag))==0)
+							continue;
+					has_next=true;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(!has_next){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+	active_start++;
+	}//while
+}
+void Graph::middleLimitSearch(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(node.vertex_loc==interval.path_end){
+				if(valid_poses_size!=Configure::max_local_results){
+					valid_poses[valid_poses_size]=active_start;
+					valid_poses_size++;
+				}
+				else
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.vertex_loc==-1){
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];//node.vertex
+		if(node.local_gap==0){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+						continue;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+		active_start++;
+   }//while
+}
+void Graph::backwardLimitSearch(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i,in_count,delta;
+	bool has_next;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(valid_poses_size!=Configure::max_local_results){
+				valid_poses[valid_poses_size]=active_start;
+				valid_poses_size++;
+			}
+			else
+				return;
+			active_start++;
+			continue;
+		}
+		if(node.vertex_loc==-1){
+			delta=node.read_pos-interval.read_end;
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+delta<=Configure::local_max_gap&&node.global_gap+delta<=Configure::global_max_gap&&node.local_edit+delta<=interval.max_edit&&node.global_edit+delta<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos==0){
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			if(ref_str[vertices[node.vertex_loc].content]==read[node.read_pos]){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos--;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos--;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];
+		if(node.local_gap==0){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					has_next=false;
+					in_count=vertex.in_count&Vertex::clear_flag;
+					for(i=0;i!=in_count;i++){
+						new_node.vertex_loc=vertex.in_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						has_next=true;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(!has_next){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos--;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					has_next=false;
+					in_count=vertex.in_count&Vertex::clear_flag;
+					for(i=0;i!=in_count;i++){
+						new_node.vertex_loc=vertex.in_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						has_next=true;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(!has_next){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos--;
+					new_node.action=SearchNode::path_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				has_next=false;
+				in_count=vertex.in_count&Vertex::clear_flag;
+				for(i=0;i!=in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+						continue;
+					has_next=true;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(!has_next){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				has_next=false;
+				in_count=vertex.in_count&Vertex::clear_flag;
+				for(i=0;i!=in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+						continue;
+					has_next=true;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(!has_next){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+		}
+	active_start++;
+	}//while
+}
+void Graph::forwardLimitSearch2(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i,delta;
+	bool has_next;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(valid_poses_size!=Configure::max_local_results){
+				valid_poses[valid_poses_size]=active_start;
+				valid_poses_size++;
+			}
+			else
+				return;
+			active_start++;
+			continue;
+		}
+		if(node.vertex_loc==-1){
+			delta=interval.read_end-node.read_pos;
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.global_gap+delta<=Configure::global_max_gap&&node.global_edit+delta<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				//new_node.local_edit++;
+				new_node.local_gap=1;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos==interval.read_end-1){
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.global_gap+1<=Configure::global_max_gap&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				//new_node.local_edit++;
+				//new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			else if(node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				//new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];
+		if(node.local_gap==0){
+				if(node.global_gap+1<=Configure::global_max_gap&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					//new_node.local_edit++;
+					new_node.local_gap=1;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					has_next=false;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						has_next=true;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(!has_next){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.global_gap+1<=Configure::global_max_gap&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.global_edit++;
+					//new_node.local_edit++;
+					//new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					has_next=false;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						has_next=true;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(!has_next){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.global_gap+1<=Configure::global_max_gap&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos++;
+					new_node.global_edit++;
+					//new_node.local_edit++;
+					//new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				has_next=false;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+					has_next=true;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(!has_next){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				//new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				has_next=false;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					if(((vertices[new_node.vertex_loc].in_count&Vertex::set_flag))==0)
+							continue;
+					has_next=true;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(!has_next){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+	active_start++;
+	}//while
+}
+void Graph::middleLimitSearch2(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(node.vertex_loc==interval.path_end){
+				if(valid_poses_size!=Configure::max_local_results){
+					valid_poses[valid_poses_size]=active_start;
+					valid_poses_size++;
+				}
+				else
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.vertex_loc==-1){
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];//node.vertex
+		if(node.local_gap==0){
+				if(node.global_gap+1<=Configure::global_max_gap&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					//new_node.local_edit++;
+					new_node.local_gap=1;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.global_gap+1<=Configure::global_max_gap&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					//new_node.local_edit++;
+					//new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.global_gap+1<=Configure::global_max_gap&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					new_node.global_edit++;
+					//new_node.local_edit++;
+					//new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				//new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+						continue;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+		active_start++;
+   }//while
+}
+void Graph::backwardLimitSearch2(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i,in_count,delta;
+	bool has_next;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(valid_poses_size!=Configure::max_local_results){
+				valid_poses[valid_poses_size]=active_start;
+				valid_poses_size++;
+			}
+			else
+				return;
+			active_start++;
+			continue;
+		}
+		if(node.vertex_loc==-1){
+			delta=node.read_pos-interval.read_end;
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.global_gap+delta<=Configure::global_max_gap&&node.global_edit+delta<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				//new_node.local_edit++;
+				new_node.local_gap=1;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos==0){
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.global_gap+1<=Configure::global_max_gap&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				//new_node.local_edit++;
+				//new_node.local_gap=1;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			if(ref_str[vertices[node.vertex_loc].content]==read[node.read_pos]){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos--;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			else if(node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos--;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				//new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];
+		if(node.local_gap==0){
+				if(node.global_gap+1<=Configure::global_max_gap&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					//new_node.local_edit++;
+					new_node.local_gap=1;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					has_next=false;
+					in_count=vertex.in_count&Vertex::clear_flag;
+					for(i=0;i!=in_count;i++){
+						new_node.vertex_loc=vertex.in_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						has_next=true;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(!has_next){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos--;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.global_gap+1<=Configure::global_max_gap&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					//new_node.local_edit++;
+					//new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					has_next=false;
+					in_count=vertex.in_count&Vertex::clear_flag;
+					for(i=0;i!=in_count;i++){
+						new_node.vertex_loc=vertex.in_edges[i];
+						if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+							continue;
+						has_next=true;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(!has_next){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.global_gap+1<=Configure::global_max_gap&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos--;
+					new_node.action=SearchNode::path_gap;
+					new_node.global_edit++;
+					//new_node.local_edit++;
+					//new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				has_next=false;
+				in_count=vertex.in_count&Vertex::clear_flag;
+				for(i=0;i!=in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+						continue;
+					has_next=true;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(!has_next){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				//new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				has_next=false;
+				in_count=vertex.in_count&Vertex::clear_flag;
+				for(i=0;i!=in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					if((vertices[new_node.vertex_loc].in_count&Vertex::set_flag)==0)
+						continue;
+					has_next=true;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(!has_next){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+		}
+	active_start++;
+	}//while
+}
+void Graph::forwardSearch(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i,delta;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(valid_poses_size!=Configure::max_local_results){
+				valid_poses[valid_poses_size]=active_start;
+				valid_poses_size++;
+			}
+			else
+				return;
+			active_start++;
+			continue;
+		}
+		if(node.vertex_loc==-1){
+			delta=interval.read_end-node.read_pos;
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+delta<=Configure::local_max_gap&&node.global_gap+delta<=Configure::global_max_gap&&node.local_edit+delta<=interval.max_edit&&node.global_edit+delta<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos==interval.read_end-1){
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];
+		if(node.local_gap==0){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(vertex.out_count==0){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(vertex.out_count==0){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos++;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(vertex.out_count==0){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(vertex.out_count==0){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+	active_start++;
+	}//while
+}
+void Graph::middleSearch(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(node.vertex_loc==interval.path_end){
+				if(valid_poses_size!=Configure::max_local_results){
+					valid_poses[valid_poses_size]=active_start;
+					valid_poses_size++;
+				}
+				else
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.vertex_loc==-1){
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];//node.vertex
+		if(node.local_gap==0){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+		active_start++;
+   }//while
+}
+void Graph::backwardSearch(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i,delta;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(valid_poses_size!=Configure::max_local_results){
+				valid_poses[valid_poses_size]=active_start;
+				valid_poses_size++;
+			}
+			else
+				return;
+			active_start++;
+			continue;
+		}
+		if(node.vertex_loc==-1){
+			delta=node.read_pos-interval.read_end;
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+delta<=Configure::local_max_gap&&node.global_gap+delta<=Configure::global_max_gap&&node.local_edit+delta<=interval.max_edit&&node.global_edit+delta<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos==0){
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			if(ref_str[vertices[node.vertex_loc].content]==read[node.read_pos]){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos--;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos--;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];
+		if(node.local_gap==0){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.in_count;i++){
+						new_node.vertex_loc=vertex.in_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(vertex.in_count==0){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos--;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.in_count;i++){
+						new_node.vertex_loc=vertex.in_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(vertex.in_count==0){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos--;
+					new_node.action=SearchNode::path_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(vertex.in_count==0){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(vertex.in_count==0){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+		}
+	active_start++;
+	}//while
+}
+int Graph::findStoneAlignment(){
+	SearchNode * pNode;
+	int k,last_start,i,j,read_len;
+	int temp_ref_index,temp_start_pos,ref_index,start_pos,ref_pos;
+	bool mapped;
+	string sub_str;
+	char action;
+	AlignmentFormat temp_alignment;
+	read_len=read.length();
+	if(intervals_size==0){
+		result_size=pLookupString->verifyResult(read,result_poses);
+		if(result_size==0)
+			return -1;
+		for(j=0;j!=result_size;j++){
+			start_pos=result_poses[j];
+			pRef_seq->countRefIndex(ref_index,start_pos,read_len);
+			if(ref_index!=-1){
+				ref_pos=result_poses[j];
+				j++;
+				break;
+			}
+		}
+		if(j==result_size)
+			return -1;
+		for(;j!=result_size;j++){
+			temp_start_pos=result_poses[j];
+			pRef_seq->countRefIndex(temp_ref_index,temp_start_pos,read_len);
+			if(temp_ref_index==-1)
+				continue;
+			if(ref_index!=temp_ref_index)
+				return -2;
+			else if(abs(start_pos-temp_start_pos)>Configure::global_max_gap)
+				return -2;
+		}
+		return ref_pos;
+	}
+	mapped=false;
+	if(intervals_size==1&&intervals[0].type==backward){
+		for(i=0;i!=valid_poses_size;i++){
+			pNode=&searchNodes[valid_poses[i]];
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else {
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			read_buf.append(part_read_buf);
+			cigar_buf.append(part_cigar_buf);
+			read_buf.append(read.substr(intervals[0].read_start+1));
+			cigar_buf.append(read_len-intervals[0].read_start-1,'=');
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			if(!mapped){
+				for(j=0;j!=result_size;j++){
+					start_pos=result_poses[j];
+					pRef_seq->countRefIndex(ref_index,start_pos,cigar_buf,read_len);
+					if(ref_index!=-1){
+						ref_pos=result_poses[j];
+						mapped=true;
+						j++;
+						break;
+					}
+				}
+				for(;j!=result_size;j++){
+					temp_start_pos=result_poses[j];
+					pRef_seq->countRefIndex(temp_ref_index,temp_start_pos,cigar_buf,read_len);
+					if(temp_ref_index==-1)
+						continue;
+					if(ref_index!=temp_ref_index)
+						return -2;
+					else if(abs(start_pos-temp_start_pos)>Configure::global_max_gap)
+						return -2;
+				}
+				continue;
+			}
+			for(j=0;j!=result_size;j++){
+				temp_start_pos=result_poses[j];
+				pRef_seq->countRefIndex(temp_ref_index,temp_start_pos,cigar_buf,read_len);
+				if(temp_ref_index==-1)
+					continue;
+				if(ref_index!=temp_ref_index)
+					return -2;
+				else if(abs(start_pos-temp_start_pos)>Configure::global_max_gap)
+					return -2;
+			}
+		}
+		if(mapped)
+			return ref_pos;
+		else
+			return -1;
+	}
+	if(intervals_size==1){
+		for(i=0;i!=valid_poses_size;i++){
+			pNode=&searchNodes[valid_poses[i]];
+			part_read_buf.clear();
+			read_buf.clear();
+			part_cigar_buf.clear();
+			cigar_buf.clear();
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else {
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			sub_str=read.substr(0,intervals[0].read_start);
+			read_buf.append(sub_str);
+			cigar_buf.append(intervals[0].read_start,'=');
+			reverse(part_read_buf.begin(),part_read_buf.end());
+			read_buf.append(part_read_buf);
+			reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+			cigar_buf.append(part_cigar_buf);
+			if(intervals[0].type==middle){
+				sub_str=read.substr(intervals[0].read_end);
+				read_buf.append(sub_str);
+				cigar_buf.append(read_len-intervals[0].read_end,'=');
+			}
+			result_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_size==0)
+				continue;
+			if(!mapped){
+				for(j=0;j!=result_size;j++){
+					start_pos=result_poses[j];
+					pRef_seq->countRefIndex(ref_index,start_pos,cigar_buf,read_len);
+					if(ref_index!=-1){
+						ref_pos=result_poses[j];
+						mapped=true;
+						j++;
+						break;
+					}
+				}
+				for(;j!=result_size;j++){
+					temp_start_pos=result_poses[j];
+					pRef_seq->countRefIndex(temp_ref_index,temp_start_pos,cigar_buf,read_len);
+					if(temp_ref_index==-1)
+						continue;
+					if(ref_index!=temp_ref_index)
+						return -2;
+					else if(abs(start_pos-temp_start_pos)>Configure::global_max_gap)
+						return -2;
+				}
+				continue;
+			}
+			for(j=0;j!=result_size;j++){
+				temp_start_pos=result_poses[j];
+				pRef_seq->countRefIndex(temp_ref_index,temp_start_pos,read_len);
+				if(temp_ref_index==-1)
+					continue;
+				if(ref_index!=temp_ref_index)
+					return -2;
+				else if(abs(start_pos-temp_start_pos)>Configure::global_max_gap)
+					return -2;
+			}
+		}
+		if(mapped)
+			return ref_pos;
+		else
+			return -1;
+	}
+	k=intervals_size-1;
+	if(intervals[k].type==middle){
+		sub_str=read.substr(intervals[k].read_end);
+		reverse(sub_str.begin(),sub_str.end());
+		read_buf.append(sub_str);
+		cigar_buf.append(read_len-intervals[k].read_end,'=');
+	}
+	for(i=0;i!=valid_poses_size;i++){
+		k=intervals_size-1;
+		last_start=-1;
+		pNode=&searchNodes[valid_poses[i]];
+		part_read_buf.clear();
+		read_buf.clear();
+		part_cigar_buf.clear();
+		cigar_buf.clear();
+		action=pNode->action;
+		pNode=&searchNodes[pNode->prev_pos];
+		while(pNode->action!=SearchNode::terminal){
+			if(pNode->action==SearchNode::start){
+				if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				if(last_start==-1){
+					last_start=intervals[k].read_start;
+				}
+				else{
+					sub_str=read.substr(intervals[k].read_end,last_start-intervals[k].read_end);
+					reverse(sub_str.begin(),sub_str.end());
+					read_buf.append(sub_str);
+					cigar_buf.append(last_start-intervals[k].read_end,'=');
+					last_start=intervals[k].read_start;
+				}
+				read_buf.append(part_read_buf);
+				cigar_buf.append(part_cigar_buf);
+				part_read_buf.clear();
+				part_cigar_buf.clear();
+				k--;
+				if(k==0){
+					action=pNode->action;
+					pNode=&searchNodes[pNode->prev_pos];
+					break;
+				}
+			}
+			else if(action==SearchNode::match){
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('=');
+			}
+			else if(action==SearchNode::mismatch){
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('X');
+			}
+			else if(action==SearchNode::read_gap){
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('D');
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			action=pNode->action;
+			pNode=&searchNodes[pNode->prev_pos];
+		}
+		if(intervals[0].type==backward){
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content]);
+			}
+			sub_str=read.substr(intervals[0].read_start+1,last_start-intervals[0].read_start-1);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(last_start-intervals[0].read_start-1,'=');
+			reverse(part_read_buf.begin(),part_read_buf.end());
+			read_buf.append(part_read_buf);
+			reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+			cigar_buf.append(part_cigar_buf);
+		}
+		else{
+			while(pNode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pNode->action;
+				pNode=&searchNodes[pNode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pNode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			sub_str=read.substr(intervals[0].read_end,last_start-intervals[0].read_end);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(last_start-intervals[0].read_end,'=');
+			read_buf.append(part_read_buf);
+			cigar_buf.append(part_cigar_buf);
+			sub_str=read.substr(0,intervals[0].read_start);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(intervals[0].read_start,'=');
+		}
+		reverse(read_buf.begin(),read_buf.end());
+		reverse(cigar_buf.begin(),cigar_buf.end());
+		result_size=pLookupString->verifyResult(read_buf,result_poses);
+		if(result_size==0)
+			continue;
+		if(!mapped){
+			for(j=0;j!=result_size;j++){
+				start_pos=result_poses[j];
+				pRef_seq->countRefIndex(ref_index,start_pos,cigar_buf,read_len);
+				if(ref_index!=-1){
+					ref_pos=result_poses[j];
+					mapped=true;
+					j++;
+					break;
+				}
+			}
+			for(;j!=result_size;j++){
+				temp_start_pos=result_poses[j];
+				pRef_seq->countRefIndex(temp_ref_index,temp_start_pos,cigar_buf,read_len);
+				if(temp_ref_index==-1)
+					continue;
+				if(ref_index!=temp_ref_index)
+					return -2;
+				else if(abs(start_pos-temp_start_pos)>Configure::global_max_gap)
+					return -2;
+			}
+			continue;
+		}
+		for(j=0;j!=result_size;j++){
+			temp_start_pos=result_poses[j];
+			pRef_seq->countRefIndex(temp_ref_index,temp_start_pos,cigar_buf,read_len);
+			if(temp_ref_index==-1)
+				continue;
+			if(ref_index!=temp_ref_index)
+				return -2;
+			else if(abs(start_pos-temp_start_pos)>Configure::global_max_gap)
+				return -2;
+		}
+	}
+	if(mapped)
+		return ref_pos;
+	else
+		return -1;
+}
+int Graph::forwardChimera(NaiveAlignmentFormat * n_alignments,const string & read){
+	int i,j,active_start,pos,read_len;
+	SearchInterval interval;
+	SearchNode node;
+	this->read=read;
+	intervals_size=0;
+	read_len=read.length();
+	marks_len=read_len-Configure::seed_size+1;
+	marks=marks_mem;
+	makeMarks(read,marks,marks_len);
+	if(!findSharedVertex())//if shared vertex is 0, return false
+		return 0;
+	intervals_size=SearchInterval::makeIntervals(lookupShared,marks,marks_len,intervals);
+	if(intervals_size==0)
+		return 0;
+	fill_n(chimera_poses,read_len,-1);
+	Configure::forward_chimera_pos=(read_len-1)/2;
+	interval=intervals[0];
+	node.action=SearchNode::terminal;
+	node.vertex_loc=interval.path_start;
+	node.read_pos=interval.read_start;
+	node.global_edit=0;
+	node.local_edit=0;
+	node.local_gap=0;
+	node.global_gap=0;
+	node.prev_pos=SearchNode::no_prev;
+	searchNodes[0]=node;
+	searchNodes_size=1;
+	active_start=0;
+	if(interval.type==backward)
+		backwardChimeraSearch(active_start,interval);
+	else if(interval.type==forward)
+		forwardChimeraSearch(active_start,interval);
+	else
+		middleChimeraSearch(active_start,interval);
+	for(i=1;i!=intervals_size;i++){
+		if(searchNodes_size==searchNodes_capacity)
+			return resolveForwardChimeraAlignment(n_alignments);
+		if(valid_poses_size==0)
+			break;
+		interval=intervals[i];
+		active_start=searchNodes_size;
+		for(j=0;j!=valid_poses_size;j++){
+			pos=valid_poses[j];
+			node.action=SearchNode::start;
+			node.vertex_loc=interval.path_start;
+			node.read_pos=interval.read_start;
+			node.global_edit=searchNodes[pos].global_edit;
+			node.local_edit=0;
+			node.local_gap=0;
+			node.global_gap=searchNodes[pos].global_gap;
+			node.prev_pos=pos;
+			searchNodes[searchNodes_size++]=node;
+			if(searchNodes_size==searchNodes_capacity)
+				return resolveForwardChimeraAlignment(n_alignments);
+		}
+		if(interval.type==forward)
+			forwardChimeraSearch(active_start,interval);
+		else
+			middleChimeraSearch(active_start,interval);
+	}
+	return resolveForwardChimeraAlignment(n_alignments);
+}
+int Graph::backwardChimera(NaiveAlignmentFormat * n_alignments,const string & read){
+	int i,j,active_start,pos,read_len;
+	SearchInterval interval;
+	SearchNode node;
+	this->read=read;
+	intervals_size=0;
+	read_len=read.length();
+	marks_len=read_len-Configure::seed_size+1;
+	marks=marks_mem;
+	makeMarks(read,marks,marks_len);
+	if(!findSharedVertex())//if shared vertex is 0, return false
+		return 0;
+	intervals_size=SearchInterval::makeBackwardIntervals(lookupShared,marks,marks_len,intervals);
+	if(intervals_size==0)
+		return 0;
+	fill_n(chimera_poses,read_len,-1);
+	Configure::backward_chimera_pos=read_len/2;
+	interval=intervals[0];
+	node.action=SearchNode::terminal;
+	node.vertex_loc=interval.path_start;
+	node.read_pos=interval.read_start;
+	node.global_edit=0;
+	node.local_edit=0;
+	node.local_gap=0;
+	node.global_gap=0;
+	node.prev_pos=SearchNode::no_prev;
+	searchNodes[0]=node;
+	searchNodes_size=1;
+	active_start=0;
+	if(interval.type==backward)
+		backward_backwardChimeraSearch(active_start,interval);
+	else if(interval.type==forward)
+		backward_forwardChimeraSearch(active_start,interval);
+	else
+		backward_middleChimeraSearch(active_start,interval);
+	for(i=1;i!=intervals_size;i++){
+		if(searchNodes_size==searchNodes_capacity)
+			return resolveBackwardChimeraAlignment(n_alignments);
+		if(valid_poses_size==0)
+			break;
+		interval=intervals[i];
+		active_start=searchNodes_size;
+		for(j=0;j!=valid_poses_size;j++){
+			pos=valid_poses[j];
+			node.action=SearchNode::start;
+			node.vertex_loc=interval.path_start;
+			node.read_pos=interval.read_start;
+			node.global_edit=searchNodes[pos].global_edit;
+			node.local_edit=0;
+			node.local_gap=0;
+			node.global_gap=searchNodes[pos].global_gap;
+			node.prev_pos=pos;
+			searchNodes[searchNodes_size++]=node;
+			if(searchNodes_size==searchNodes_capacity)
+				return resolveBackwardChimeraAlignment(n_alignments);
+		}
+		if(interval.type==forward)
+			backward_forwardChimeraSearch(active_start,interval);
+		else
+			backward_middleChimeraSearch(active_start,interval);
+	}
+	return resolveBackwardChimeraAlignment(n_alignments);
+}
+void Graph::forwardChimeraSearch(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i,delta;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(valid_poses_size!=Configure::max_local_results){
+				valid_poses[valid_poses_size]=active_start;
+				valid_poses_size++;
+			}
+			else
+				return;
+			active_start++;
+			continue;
+		}
+		if(node.read_pos>Configure::forward_chimera_pos){
+			if(chimera_poses[node.read_pos]==-1)
+				chimera_poses[node.read_pos]=active_start;
+			else if(searchNodes[chimera_poses[node.read_pos]].global_edit>searchNodes[active_start].global_edit)
+				chimera_poses[node.read_pos]=active_start;
+			else if(searchNodes[chimera_poses[node.read_pos]].global_edit==searchNodes[active_start].global_edit){
+				if(searchNodes[chimera_poses[node.read_pos]].global_gap>searchNodes[active_start].global_gap)
+					chimera_poses[node.read_pos]=active_start;
+			}
+		}
+		if(node.vertex_loc==-1){
+			delta=interval.read_end-node.read_pos;
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+delta<=Configure::local_max_gap&&node.global_gap+delta<=Configure::global_max_gap&&node.local_edit+delta<=interval.max_edit&&node.global_edit+delta<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos==interval.read_end-1){
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];
+		if(node.local_gap==0){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(vertex.out_count==0){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(vertex.out_count==0){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos++;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(vertex.out_count==0){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(vertex.out_count==0){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+	active_start++;
+	}//while
+}
+void Graph::middleChimeraSearch(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(node.vertex_loc==interval.path_end){
+				if(valid_poses_size!=Configure::max_local_results){
+					valid_poses[valid_poses_size]=active_start;
+					valid_poses_size++;
+				}
+				else
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos>Configure::forward_chimera_pos){
+			if(chimera_poses[node.read_pos]==-1)
+				chimera_poses[node.read_pos]=active_start;
+			else if(searchNodes[chimera_poses[node.read_pos]].global_edit>searchNodes[active_start].global_edit)
+				chimera_poses[node.read_pos]=active_start;
+			else if(searchNodes[chimera_poses[node.read_pos]].global_edit==searchNodes[active_start].global_edit){
+				if(searchNodes[chimera_poses[node.read_pos]].global_gap>searchNodes[active_start].global_gap)
+					chimera_poses[node.read_pos]=active_start;
+			}
+		}
+		if(node.vertex_loc==-1){
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];//node.vertex
+		if(node.local_gap==0){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos++;
+					new_node.action=SearchNode::path_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos++;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+		active_start++;
+   }//while
+}
+void Graph::backwardChimeraSearch(int active_start,const SearchInterval & interval){
+	SearchNode node,new_node;
+	Vertex vertex;
+	int i,delta;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(valid_poses_size!=Configure::max_local_results){
+				valid_poses[valid_poses_size]=active_start;
+				valid_poses_size++;
+			}
+			else
+				return;
+			active_start++;
+			continue;
+		}
+		if(node.vertex_loc==-1){
+			delta=node.read_pos-interval.read_end;
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+delta<=Configure::local_max_gap&&node.global_gap+delta<=Configure::global_max_gap&&node.local_edit+delta<=interval.max_edit&&node.global_edit+delta<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos==0){
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			if(ref_str[vertices[node.vertex_loc].content]==read[node.read_pos]){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos--;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.vertex_loc=-1;
+				new_node.read_pos--;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];
+		if(node.local_gap==0){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.in_count;i++){
+						new_node.vertex_loc=vertex.in_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(vertex.in_count==0){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos--;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.in_count;i++){
+						new_node.vertex_loc=vertex.in_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(vertex.in_count==0){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node=node;
+					new_node.read_pos--;
+					new_node.action=SearchNode::path_gap;
+					new_node.global_edit++;
+					new_node.local_edit++;
+					new_node.local_gap++;
+					new_node.global_gap++;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content]==read[node.read_pos]){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::match;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(vertex.in_count==0){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(vertex.in_count==0){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+		}
+	active_start++;
+	}//while
+}
+void Graph::backward_backwardChimeraSearch(int active_start,const SearchInterval & interval){
+	SearchNode node;
+	SearchNode new_node;
+	Vertex vertex;
+	int i,delta;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(valid_poses_size!=Configure::max_local_results){
+				valid_poses[valid_poses_size]=active_start;
+				valid_poses_size++;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos<Configure::backward_chimera_pos){
+			if(chimera_poses[node.read_pos]==-1)
+				chimera_poses[node.read_pos]=active_start;
+			else if(searchNodes[chimera_poses[node.read_pos]].global_edit>searchNodes[active_start].global_edit)
+				chimera_poses[node.read_pos]=active_start;
+			else if(searchNodes[chimera_poses[node.read_pos]].global_edit==searchNodes[active_start].global_edit){
+				if(searchNodes[chimera_poses[node.read_pos]].global_gap>searchNodes[active_start].global_gap)
+					chimera_poses[node.read_pos]=active_start;
+			}
+		}
+		if(node.vertex_loc==-1){
+			delta=node.read_pos-interval.read_end;
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+delta<=Configure::local_max_gap&&node.global_gap+delta<=Configure::global_max_gap&&node.local_edit+delta<=interval.max_edit&&node.global_edit+delta<=Configure::global_max_edit){
+				new_node.vertex_loc=-1;
+				new_node.read_pos=node.read_pos-1;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit=node.global_edit+1;
+				new_node.local_edit=node.local_edit+1;
+				new_node.local_gap=node.local_gap+1;
+				new_node.global_gap=node.global_gap+1;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_size)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos==interval.read_end+1){
+			if((node.local_gap==0 || node.action==SearchNode::path_gap)&&node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node.vertex_loc=node.vertex_loc;
+				new_node.read_pos=node.read_pos-1;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit=node.global_edit+1;
+				new_node.local_edit=node.local_edit+1;
+				new_node.local_gap=node.local_gap+1;
+				new_node.global_gap=node.global_gap+1;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_size)
+					return;
+			}
+			if(ref_str[vertices[node.vertex_loc].content]==read[node.read_pos]){
+				new_node.vertex_loc=-1;
+				new_node.read_pos=node.read_pos-1;
+				new_node.action=SearchNode::match;
+				new_node.global_edit=node.global_edit;
+				new_node.local_edit=node.local_edit;
+				new_node.local_gap=node.local_gap;
+				new_node.global_gap=node.global_gap;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_size)
+					return;
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node.vertex_loc=-1;
+				new_node.read_pos=node.read_pos-1;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit=node.global_edit+1;
+				new_node.local_edit=node.local_edit+1;
+				new_node.local_gap=node.local_gap;
+				new_node.global_gap=node.global_gap;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_size)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];
+		if(node.local_gap==0){
+			if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.action=SearchNode::read_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(vertex.in_count==0){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				new_node.vertex_loc=node.vertex_loc;
+				new_node.read_pos--;
+				new_node.action=SearchNode::path_gap;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+		}
+		else if(node.action==SearchNode::read_gap){
+			if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.action=SearchNode::read_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(vertex.in_count==0){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+		}
+		else if(node.action==SearchNode::path_gap){
+			if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node=node;
+				new_node.read_pos--;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit++;
+				new_node.local_edit++;
+				new_node.local_gap++;
+				new_node.global_gap++;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+		}
+		if(ref_str[vertices[node.vertex_loc].content]==read[node.read_pos]){
+			new_node=node;
+			new_node.read_pos--;
+			new_node.action=SearchNode::match;
+			new_node.prev_pos=active_start;
+			for(i=0;i!=vertex.in_count;i++){
+				new_node.vertex_loc=vertex.in_edges[i];
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			if(vertex.in_count==0){
+				new_node.vertex_loc=-1;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+		}
+		else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+			new_node=node;
+			new_node.read_pos--;
+			new_node.action=SearchNode::mismatch;
+			new_node.global_edit++;
+			new_node.local_edit++;
+			new_node.prev_pos=active_start;
+			for(i=0;i!=vertex.in_count;i++){
+				new_node.vertex_loc=vertex.in_edges[i];
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			if(vertex.in_count==0){
+				new_node.vertex_loc=-1;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+	}
+	active_start++;
+ }//while
+}
+void Graph::backward_middleChimeraSearch(int active_start,const SearchInterval & interval){
+	SearchNode node;
+	SearchNode new_node;
+	Vertex vertex;
+	int i;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(node.vertex_loc==interval.path_end){
+				if(valid_poses_size!=Configure::max_local_results)
+					valid_poses[valid_poses_size++]=active_start;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos<Configure::backward_chimera_pos){
+			if(chimera_poses[node.read_pos]==-1)
+				chimera_poses[node.read_pos]=active_start;
+			else if(searchNodes[chimera_poses[node.read_pos]].global_edit>searchNodes[active_start].global_edit)
+				chimera_poses[node.read_pos]=active_start;
+			else if(searchNodes[chimera_poses[node.read_pos]].global_edit==searchNodes[active_start].global_edit){
+				if(searchNodes[chimera_poses[node.read_pos]].global_gap>searchNodes[active_start].global_gap)
+					chimera_poses[node.read_pos]=active_start;
+			}
+		}
+		if(node.vertex_loc==-1)
+			continue;
+		vertex=vertices[node.vertex_loc];//node.vertex
+		if(node.local_gap==0){
+			if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node.read_pos=node.read_pos;
+				new_node.action=SearchNode::read_gap;
+				new_node.global_edit=node.global_edit+1;
+				new_node.local_edit=node.local_edit+1;
+				new_node.local_gap=node.local_gap+1;
+				new_node.global_gap=node.global_gap+1;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				new_node.vertex_loc=node.vertex_loc;
+				new_node.read_pos=node.read_pos-1;
+				new_node.action=SearchNode::path_gap;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_size)
+					return;
+			}
+		}
+		else if(node.action==SearchNode::read_gap){
+			if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node.read_pos=node.read_pos;
+				new_node.action=SearchNode::read_gap;
+				new_node.global_edit=node.global_edit+1;
+				new_node.local_edit=node.local_edit+1;
+				new_node.local_gap=node.local_gap+1;
+				new_node.global_gap=node.global_gap+1;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.in_count;i++){
+					new_node.vertex_loc=vertex.in_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+		}
+		else if(node.action==SearchNode::path_gap){
+			if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node.vertex_loc=node.vertex_loc;
+				new_node.read_pos=node.read_pos-1;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit=node.global_edit+1;
+				new_node.local_edit=node.local_edit+1;
+				new_node.local_gap=node.local_gap+1;
+				new_node.global_gap=node.global_gap+1;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+		}
+		if(ref_str[vertices[node.vertex_loc].content]==read[node.read_pos]){
+			new_node.read_pos=node.read_pos-1;
+			new_node.action=SearchNode::match;
+			new_node.global_edit=node.global_edit;
+			new_node.local_edit=node.local_edit;
+			new_node.local_gap=node.local_gap;
+			new_node.global_gap=node.global_gap;
+			new_node.prev_pos=active_start;
+			for(i=0;i!=vertex.in_count;i++){
+				new_node.vertex_loc=vertex.in_edges[i];
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+		}
+		else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+			new_node.read_pos=node.read_pos-1;
+			new_node.action=SearchNode::mismatch;
+			new_node.global_edit=node.global_edit+1;
+			new_node.local_edit=node.local_edit+1;
+			new_node.local_gap=node.local_gap;
+			new_node.global_gap=node.global_gap;
+			new_node.prev_pos=active_start;
+			for(i=0;i!=vertex.in_count;i++){
+				new_node.vertex_loc=vertex.in_edges[i];
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+		}
+		active_start++;
+	 }//while
+}
+void Graph::backward_forwardChimeraSearch(int active_start,const SearchInterval & interval){
+	SearchNode node;
+	SearchNode new_node;
+	Vertex vertex;
+	int i,delta;
+	valid_poses_size=0;
+	while(active_start!=searchNodes_size){
+		node=searchNodes[active_start];
+		if(node.read_pos==interval.read_end){
+			if(valid_poses_size!=Configure::max_local_results)
+				valid_poses[valid_poses_size++]=active_start;
+			active_start++;
+			continue;
+		}
+		if(node.vertex_loc==-1){
+			delta=interval.read_end-node.read_pos;
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+delta<=Configure::local_max_gap&&node.global_gap+delta<=Configure::global_max_gap&&node.local_edit+delta<=interval.max_edit&&node.global_edit+delta<=Configure::global_max_edit){
+				new_node.vertex_loc=-1;
+				new_node.read_pos=node.read_pos+1;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit=node.global_edit+1;
+				new_node.local_edit=node.local_edit+1;
+				new_node.local_gap=node.local_gap+1;
+				new_node.global_gap=node.global_gap+1;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_size)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		if(node.read_pos==interval.read_end-1){
+			if((node.local_gap==0||node.action==SearchNode::path_gap)&&node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node.vertex_loc=node.vertex_loc;
+				new_node.read_pos=node.read_pos+1;
+				new_node.action=SearchNode::path_gap;
+				new_node.global_edit=node.global_edit+1;
+				new_node.local_edit=node.local_edit+1;
+				new_node.local_gap=node.local_gap+1;
+				new_node.global_gap=node.global_gap+1;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_size)
+					return;
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node.vertex_loc=-1;
+				new_node.read_pos=node.read_pos+1;
+				new_node.action=SearchNode::match;
+				new_node.global_edit=node.global_edit;
+				new_node.local_edit=node.local_edit;
+				new_node.local_gap=node.local_gap;
+				new_node.global_gap=node.global_gap;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_size)
+					return;
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node.vertex_loc=-1;
+				new_node.read_pos=node.read_pos+1;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit=node.global_edit+1;
+				new_node.local_edit=node.local_edit+1;
+				new_node.local_gap=node.local_gap;
+				new_node.global_gap=node.global_gap;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_size)
+					return;
+			}
+			active_start++;
+			continue;
+		}
+		vertex=vertices[node.vertex_loc];//node.vertex
+		if(node.local_gap==0){
+			if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node.read_pos=node.read_pos;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit=node.global_edit+1;
+					new_node.local_edit=node.local_edit+1;
+					new_node.local_gap=node.local_gap+1;
+					new_node.global_gap=node.global_gap+1;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos=node.read_pos+1;
+					new_node.action=SearchNode::path_gap;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+			}
+			else if(node.action==SearchNode::read_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node.read_pos=node.read_pos;
+					new_node.action=SearchNode::read_gap;
+					new_node.global_edit=node.global_edit+1;
+					new_node.local_edit=node.local_edit+1;
+					new_node.local_gap=node.local_gap+1;
+					new_node.global_gap=node.global_gap+1;
+					new_node.prev_pos=active_start;
+					for(i=0;i!=vertex.out_count;i++){
+						new_node.vertex_loc=vertex.out_edges[i];
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+					if(vertex.out_count==0){
+						new_node.vertex_loc=-1;
+						searchNodes[searchNodes_size++]=new_node;
+						if(searchNodes_size==searchNodes_capacity)
+							return;
+					}
+				}
+			}
+			else if(node.action==SearchNode::path_gap){
+				if(node.local_gap+1<=Configure::local_max_gap&&node.global_gap+1<=Configure::global_max_gap&&node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+					new_node.vertex_loc=node.vertex_loc;
+					new_node.read_pos=node.read_pos+1;
+					new_node.action=SearchNode::path_gap;
+					new_node.global_edit=node.global_edit+1;
+					new_node.local_edit=node.local_edit+1;
+					new_node.local_gap=node.local_gap+1;
+					new_node.global_gap=node.global_gap+1;
+					new_node.prev_pos=active_start;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_size)
+						return;
+				}
+			}
+			if(ref_str[vertices[node.vertex_loc].content+Configure::seed_size-1]==read[node.read_pos]){
+				new_node.read_pos=node.read_pos+1;
+				new_node.action=SearchNode::match;
+				new_node.global_edit=node.global_edit;
+				new_node.local_edit=node.local_edit;
+				new_node.local_gap=node.local_gap;
+				new_node.global_gap=node.global_gap;
+				new_node.prev_pos=active_start;
+				searchNodes[searchNodes_size++]=new_node;
+				if(searchNodes_size==searchNodes_capacity)
+					return;
+			}
+			else if(node.local_edit+1<=interval.max_edit&&node.global_edit+1<=Configure::global_max_edit){
+				new_node.read_pos=node.read_pos+1;
+				new_node.action=SearchNode::mismatch;
+				new_node.global_edit=node.global_edit+1;
+				new_node.local_edit=node.local_edit+1;
+				new_node.local_gap=node.local_gap;
+				new_node.global_gap=node.global_gap;
+				new_node.prev_pos=active_start;
+				for(i=0;i!=vertex.out_count;i++){
+					new_node.vertex_loc=vertex.out_edges[i];
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+				}
+				if(vertex.out_count==0){
+					new_node.vertex_loc=-1;
+					searchNodes[searchNodes_size++]=new_node;
+					if(searchNodes_size==searchNodes_capacity)
+						return;
+			}
+		}
+		active_start++;
+	}//while
+}
+int Graph::resolveForwardChimeraAlignment(NaiveAlignmentFormat * n_alignments){
+	SearchNode *phead,* pnode;
+	SearchInterval * pinterval;
+	NaiveAlignmentFormat n_alignment;
+	int k,last_start,i,j,result_poses_size,n_alignments_size,read_len;
+	string sub_str;
+	char action;
+	n_alignments_size=0;
+	read_len=read.length();
+	for(i=0;i!=intervals_size;i++){
+		pinterval=&intervals[i];
+		if(pinterval->type==backward){
+			for(j=pinterval->read_start;j!=pinterval->read_end;j--)
+				pLookupInterval[j]=i;
+		}
+		else{
+			for(j=pinterval->read_start;j!=pinterval->read_end;j++)
+				pLookupInterval[j]=i;
+			chimera_poses[pinterval->read_start]=-1;
+		}
+	}
+	n_alignments_size=0;
+	for(i=read_len-1;i!=Configure::forward_chimera_pos;i--){
+		if(chimera_poses[i]==-1)
+			continue;
+		phead=&searchNodes[chimera_poses[i]];
+		k=pLookupInterval[phead->read_pos];
+		part_read_buf.clear();
+		read_buf.clear();
+		part_cigar_buf.clear();
+		cigar_buf.clear();
+		action=phead->action;
+		pnode=&searchNodes[phead->prev_pos];
+		if(k==0){
+			pinterval=&intervals[0];
+			while(pnode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pnode->action;
+				pnode=&searchNodes[pnode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('D');
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('=');
+			}
+			sub_str=read.substr(0,pinterval->read_start);
+			read_buf.append(sub_str);
+			cigar_buf.append(pinterval->read_start,'=');
+			reverse(part_read_buf.begin(),part_read_buf.end());
+			read_buf.append(part_read_buf);
+			reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+			cigar_buf.append(part_cigar_buf);
+			cigar_buf.append(read_len-phead->read_pos,'S');
+			result_poses_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_poses_size==0)
+				continue;
+			n_alignment.cigar=cigar_buf;
+			n_alignment.edit=phead->global_edit;
+			n_alignment.ref_read_len=read_buf.length();
+			for(j=0;j!=result_poses_size;j++){
+				n_alignment.ref_pos=result_poses[j];
+				n_alignments[n_alignments_size++]=n_alignment;
+				if(n_alignments_size==Configure::max_local_results)
+					return n_alignments_size;
+			}
+			if(n_alignments_size)
+				return n_alignments_size;
+			else
+				continue;
+		}
+		last_start=-1;
+		while(pnode->action!=SearchNode::terminal){
+			if(pnode->action==SearchNode::start){
+				pinterval=&intervals[k--];
+				if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				if(last_start==-1){
+					read_buf.append(part_read_buf);
+					cigar_buf.append(part_cigar_buf);
+					last_start=pinterval->read_start;
+				}
+				else{
+					sub_str=read.substr(pinterval->read_end,last_start-pinterval->read_end);
+					reverse(sub_str.begin(),sub_str.end());
+					read_buf.append(sub_str);
+					cigar_buf.append(last_start-pinterval->read_end,'=');
+					read_buf.append(part_read_buf);
+					cigar_buf.append(part_cigar_buf);
+					last_start=pinterval->read_start;
+				}
+				part_read_buf.clear();
+				part_cigar_buf.clear();
+				if(k==0){
+					action=pnode->action;
+					pnode=&searchNodes[pnode->prev_pos];
+					break;
+				}
+			}
+			else if(action==SearchNode::match){
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('=');
+			}
+			else if(action==SearchNode::mismatch){
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('X');
+			}
+			else if(action==SearchNode::read_gap){
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+				part_cigar_buf.push_back('D');
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			action=pnode->action;
+			pnode=&searchNodes[pnode->prev_pos];
+		}
+		pinterval=&intervals[0];
+		if(pinterval->type==backward){
+			while(pnode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pnode->action;
+				pnode=&searchNodes[pnode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+			}
+			sub_str=read.substr(pinterval->read_start+1,last_start-pinterval->read_start-1);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(last_start-pinterval->read_start-1,'=');
+			reverse(part_read_buf.begin(),part_read_buf.end());
+			read_buf.append(part_read_buf);
+			reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+			cigar_buf.append(part_cigar_buf);
+		}
+		else{
+			while(pnode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pnode->action;
+				pnode=&searchNodes[pnode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			if(last_start==-1)
+			sub_str=read.substr(pinterval->read_end,last_start-pinterval->read_end);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(last_start-pinterval->read_end,'=');
+			read_buf.append(part_read_buf);
+			cigar_buf.append(part_cigar_buf);
+			sub_str=read.substr(0,pinterval->read_start);
+			reverse(sub_str.begin(),sub_str.end());
+			read_buf.append(sub_str);
+			cigar_buf.append(pinterval->read_start,'=');
+		}
+		reverse(read_buf.begin(),read_buf.end());
+		reverse(cigar_buf.begin(),cigar_buf.end());
+		cigar_buf.append(read_len-phead->read_pos,'S');
+		result_poses_size=pLookupString->verifyResult(read_buf,result_poses);
+		if(result_poses_size==0)
+			continue;
+		n_alignment.cigar=cigar_buf;
+		n_alignment.edit=phead->global_edit;
+		n_alignment.ref_read_len=read_buf.length();
+		for(j=0;j!=result_poses_size;j++){
+			n_alignment.ref_pos=result_poses[j];
+			n_alignments[n_alignments_size++]=n_alignment;
+			if(n_alignments_size==Configure::max_local_results)
+				return n_alignments_size;
+		}
+		if(n_alignments_size)
+			return n_alignments_size;
+	}
+	return 0;
+}
+int Graph::resolveBackwardChimeraAlignment(NaiveAlignmentFormat * n_alignments){
+	SearchNode * pnode,* phead;
+	SearchInterval * pinterval;
+	int k,last_start,i,j,result_poses_size,n_alignments_size,read_len;
+	string sub_str;
+	NaiveAlignmentFormat n_alignment;
+	char action;
+	n_alignments_size=0;
+	read_len=read.length();
+	for(i=0;i!=intervals_size;i++){
+		pinterval=&intervals[i];
+		if(pinterval->type==forward){
+			for(j=pinterval->read_start;j!=pinterval->read_end;j++)
+				pLookupInterval[j]=i;
+		}
+		else{
+			for(j=pinterval->read_start;j!=pinterval->read_end;j--)
+				pLookupInterval[j]=i;
+			chimera_poses[pinterval->read_start]=-1;
+		}
+	}
+	for(i=0;i!=Configure::backward_chimera_pos;i++){
+		if(chimera_poses[i]==-1)
+			continue;
+		phead=&searchNodes[chimera_poses[i]];
+		part_read_buf.clear();
+		read_buf.clear();
+		part_cigar_buf.clear();
+		cigar_buf.clear();
+		k=pLookupInterval[phead->read_pos];
+		action=phead->action;
+		pnode=&searchNodes[phead->prev_pos];
+		if(k==0){
+			pinterval=&intervals[0];
+			while(pnode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pnode->action;
+				pnode=&searchNodes[pnode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+				part_cigar_buf.push_back('D');
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+				part_cigar_buf.push_back('=');
+			}
+			read_buf.append(part_read_buf);
+			sub_str=read.substr(pinterval->read_start+1);
+			read_buf.append(sub_str);
+			cigar_buf.append(phead->read_pos+1,'S');
+			cigar_buf.append(part_cigar_buf);
+			cigar_buf.append(read_len-pinterval->read_start-1,'=');
+			result_poses_size=pLookupString->verifyResult(read_buf,result_poses);
+			if(result_poses_size==0)
+				continue;
+			n_alignment.cigar=cigar_buf;
+			n_alignment.edit=phead->global_edit;
+			n_alignment.ref_read_len=read_buf.length();
+			for(j=0;j!=result_poses_size;j++){
+				n_alignment.ref_pos=result_poses[j];
+				n_alignments[n_alignments_size++]=n_alignment;
+				if(n_alignments_size==Configure::max_local_results)
+					return n_alignments_size;
+			}
+			if(n_alignments_size)
+				return n_alignments_size;
+			else
+				continue;
+		}
+		last_start=-1;
+		while(pnode->action!=SearchNode::terminal){
+			if(pnode->action==SearchNode::start){
+				pinterval=&intervals[k--];
+				if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				else{
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				if(last_start==-1){
+					cigar_buf.append(phead->read_pos+1,'S');
+					cigar_buf.append(part_cigar_buf);
+					read_buf.append(part_read_buf);
+					last_start=pinterval->read_start;
+				}
+				else{
+					sub_str=read.substr(last_start+1,pinterval->read_end-last_start);
+					read_buf.append(sub_str);
+					read_buf.append(part_read_buf);
+					cigar_buf.append(pinterval->read_end-last_start,'=');
+					cigar_buf.append(part_cigar_buf);
+					last_start=pinterval->read_start;
+				}
+				part_read_buf.clear();
+				part_cigar_buf.clear();
+				if(k==0){
+					action=pnode->action;
+					pnode=&searchNodes[pnode->prev_pos];
+					break;
+				}
+			}
+			else if(action==SearchNode::match){
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+				part_cigar_buf.push_back('=');
+			}
+			else if(action==SearchNode::mismatch){
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+				part_cigar_buf.push_back('X');
+			}
+			else if(action==SearchNode::read_gap){
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+				part_cigar_buf.push_back('D');
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			action=pnode->action;
+			pnode=&searchNodes[pnode->prev_pos];
+		}
+		pinterval=&intervals[0];
+		if(pinterval->type==forward){
+			while(pnode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pnode->action;
+				pnode=&searchNodes[pnode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content+Configure::seed_size-1]);
+			}
+			sub_str=read.substr(last_start+1,pinterval->read_start-last_start-1);
+			read_buf.append(sub_str);
+			cigar_buf.append(pinterval->read_start-last_start-1,'=');
+			reverse(part_read_buf.begin(),part_read_buf.end());
+			read_buf.append(part_read_buf);
+			reverse(part_cigar_buf.begin(),part_cigar_buf.end());
+			cigar_buf.append(part_cigar_buf);
+		}
+		else{
+			while(pnode->action!=SearchNode::terminal){
+				if(action==SearchNode::match){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+					part_cigar_buf.push_back('=');
+				}
+				else if(action==SearchNode::mismatch){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+					part_cigar_buf.push_back('X');
+				}
+				else if(action==SearchNode::read_gap){
+					part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+					part_cigar_buf.push_back('D');
+				}
+				else if(action==SearchNode::path_gap){
+					part_cigar_buf.push_back('I');
+				}
+				action=pnode->action;
+				pnode=&searchNodes[pnode->prev_pos];
+			}
+			if(action==SearchNode::read_gap){
+				part_cigar_buf.push_back('D');
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+			}
+			else if(action==SearchNode::path_gap){
+				part_cigar_buf.push_back('I');
+			}
+			else{
+				part_cigar_buf.push_back('=');
+				part_read_buf.push_back(ref_str[vertices[pnode->vertex_loc].content]);
+			}
+			sub_str=read.substr(last_start+1,pinterval->read_end-last_start);
+			read_buf.append(sub_str);
+			cigar_buf.append(pinterval->read_end-last_start,'=');
+			read_buf.append(part_read_buf);
+			cigar_buf.append(part_cigar_buf);
+			sub_str=read.substr(pinterval->read_start+1);
+			read_buf.append(sub_str);
+			cigar_buf.append(read_len-pinterval->read_start-1,'=');
+		}
+		result_poses_size=pLookupString->verifyResult(read_buf,result_poses);
+		if(result_poses_size==0)
+			continue;
+		n_alignment.cigar=cigar_buf;
+		n_alignment.edit=phead->global_edit;
+		n_alignment.ref_read_len=read_buf.length();
+		for(j=0;j!=result_poses_size;j++){
+			n_alignment.ref_pos=result_poses[j];
+			n_alignments[n_alignments_size++]=n_alignment;
+			if(n_alignments_size==Configure::max_local_results)
+				return n_alignments_size;
+		}
+		if(n_alignments_size)
+			return n_alignments_size;
+	}
+	return 0;
+}
+void Graph::makeMarks(const string & read,bool temp_marks[],int len){
+	int i,island_count,gap_count;
+	bool in_gap;
+	string str;
+	for(i=0;i!=len;i++){
+		str=read.substr(i,Configure::seed_size);
+		if(pLookupString->containsKey(str))
+			temp_marks[i]=true;
+		else
+			temp_marks[i]=false;
+	}
+	gap_count=0;
+	for(i=0;i!=len;i++){
+		if(temp_marks[i])
+			break;
+		else
+			gap_count++;
+	}
+	island_count=0;
+	for(;i!=len;i++){
+		if(temp_marks[i])
+			island_count++;
+		else
+			break;
+	}
+	if(i==len)
+		return;
+	if(gap_count==0){
+		if(island_count>=2){
+			temp_marks[i-1]=false;
+			gap_count=1;
+		}
+		else{
+			gap_count=0;
+		}
+	}
+	else{
+		if(island_count>=3){
+			temp_marks[i-island_count]=false;
+			temp_marks[i-1]=false;
+			gap_count=1;
+		}
+		else if(island_count==2){
+			temp_marks[i-1]=false;
+			gap_count=1;
+		}
+		else{
+			gap_count=0;
+		}
+	}
+	in_gap=true;
+	for(;i!=len;i++){
+		if(temp_marks[i]){
+			if(in_gap){
+				in_gap=false;
+				island_count=1;
+			}
+			else{
+				island_count++;
+			}
+		}
+		else{
+			if(in_gap){
+				gap_count++;
+			}
+			else{
+				if(island_count>=3){
+					temp_marks[i-island_count]=false;
+					temp_marks[i-1]=false;
+					if(gap_count+1<Configure::seed_size&&!temp_marks[i-island_count-gap_count-2])
+						temp_marks[i-island_count-gap_count-1]=false;
+						gap_count=2;
+				}
+				else if(island_count==2){
+					if(gap_count+1<Configure::seed_size){
+						temp_marks[i-2]=false;
+						temp_marks[i-1]=false;
+						gap_count+=3;
+					}
+					else if(gap_count<Configure::seed_size){
+						temp_marks[i-2]=false;
+						gap_count=1;
+					}
+					else{
+						temp_marks[i-1]=false;
+						gap_count=2;
+					}
+				}
+				else if(island_count==1){
+					if(gap_count<Configure::seed_size){
+						temp_marks[i-1]=false;
+						gap_count+=2;
+					}
+					else
+						gap_count=1;
+				}
+				in_gap=true;
+			}
+		}
+	}
+	if(!in_gap){
+		if(island_count>=3){
+			temp_marks[i-island_count]=false;
+			if(gap_count+1<Configure::seed_size&&!temp_marks[i-island_count-gap_count-2])
+					temp_marks[i-island_count-gap_count-1]=false;
+		}
+		else if(island_count==2)
+			temp_marks[i-2]=false;
+	}
+}
