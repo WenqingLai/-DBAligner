@@ -14,7 +14,7 @@ int FileFormat::fa=0;
 int FileFormat::fq=1;
 int FileFormat::unknown=2;
 
-string Configure::config_file="./configure";
+string Configure::config_file="./runtime_parameters";
 string Configure::dir="/home/laiwenqi/Documents/Test_Data/";
 string Configure::refs_file="Sakai.fa";
 string Configure::reads_file="left_reads.fq right_reads.fq";
