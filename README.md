@@ -14,7 +14,7 @@ To launch DBAligner, just type "DBAligner" in the terminal if the file "runtime_
 
 Runtime parameters are divided mainly to three categories: IO, single reads and paired reads.
 
-IO:
+###IO:
 ##data_dir="./"
 Input and output directory
 ##ref_file="reference.fa"
@@ -24,7 +24,7 @@ Or reads_file="reads.fq" in single reads alignment. Reads file can also be fa fo
 ##aln_result="DBAligner.sam"
 Aln_result can only be SAM format.
 
-Single reads:
+###Single reads:
 ##seed_size=18
 Seed_size is tuned not too high and not too low for accuracy vs speed
 ##global_edits_ratio=0.15
@@ -50,7 +50,7 @@ The maximum allowed sequences in reference.For instance, the human genome only n
 ##max_read_len=500
 We can align reads with various lengths ranging from seed size to max_read_len.
 
-Paired reads exclusive:
+###Paired reads exclusive:
 ##vote_cutoff=0.2
 When either end of pe can be mapped.DBAligner realign the pe by aligning the two ends simultanously.
 This parameter controls candidate positions selection. 
